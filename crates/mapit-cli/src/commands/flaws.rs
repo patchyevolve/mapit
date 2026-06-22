@@ -20,7 +20,7 @@ pub async fn run(target: &Path, severity: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    for (flaw, node_name, file_path) in &flaws {
+    for (flaw, node_name, file_path, _primary_node_id) in &flaws {
         let loc = file_path.as_deref().unwrap_or("?");
         println!(
             "  [{:5}] {:30} {:15} {:6.0}%  {}  {}",

@@ -433,6 +433,32 @@ impl GraphStore {
         Ok(results)
     }
 
+    /// Get all nodes (up to 10000).
+    pub fn get_all_nodes(&self) -> Result<Vec<Node>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
+             FROM nodes ORDER BY name LIMIT 10000",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let mut node: Node =
+                serde_json::from_str(&json).context("deserialize all_nodes result")?;
+            node.fix_node_type();
+            if let Node::Function(f) = &mut node {
+                if let Some(v) = row.get::<_, Option<i32>>(1)? {
+                    f.has_incoming_calls = v != 0;
+                }
+                if let Some(v) = row.get::<_, Option<i32>>(2)? {
+                    f.is_entry_point_candidate = v != 0;
+                }
+            }
+            results.push(node);
+        }
+        Ok(results)
+    }
+
     /// Count of function nodes.
     pub fn function_count(&self) -> Result<u64> {
         let count: i64 = self
@@ -450,7 +476,7 @@ impl GraphStore {
     pub fn query_flaws(
         &self,
         severity_filter: Option<&str>,
-    ) -> Result<Vec<(FlawFlag, /* node_name */ String, /* file_path */ Option<String>)>> {
+    ) -> Result<Vec<(FlawFlag, /* node_name */ String, /* file_path */ Option<String>, /* primary_node_id */ String)>> {
         let sql = match severity_filter {
             Some(_) => {
                 "SELECT f.id, f.kind, f.severity, f.description, f.confidence, f.basis,
@@ -487,6 +513,7 @@ impl GraphStore {
             let related_json: Option<String> = row.get(7)?;
             let node_name: String = row.get(8)?;
             let file_path: Option<String> = row.get(9)?;
+            let primary_node_id: String = row.get(6)?;
 
             let flaw_kind = match kind.as_str() {
                 "dead_code" => super::model::FlawKind::DeadCode,
@@ -524,6 +551,7 @@ impl GraphStore {
                 },
                 node_name,
                 file_path,
+                primary_node_id,
             ));
         }
         Ok(results)

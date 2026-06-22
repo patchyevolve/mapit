@@ -1,4 +1,3 @@
-//! Default `mapit` (no subcommand) — init if first run, map, then open hints.
 use std::path::Path;
 use anyhow::Result;
 use mapit_core::config;
@@ -20,12 +19,22 @@ pub async fn run(target: &Path) -> Result<()> {
     super::map::run(target, false).await?;
 
     if is_first_run {
-        println!("✓ First map complete. Run `mapit open` to view (Phase 7).");
-        println!("  Try:  mapit find <name>   — search for a symbol");
-        println!("        mapit explain <name> — show symbol details");
-        println!("        mapit status         — show graph summary");
-    } else {
-        println!("Run `mapit open` to view the interactive graph (Phase 7).");
+        println!("✓ First map complete.");
     }
+
+    // Start server and open browser
+    let global = config::load_global_config(&config_dir).unwrap_or_default();
+    let port = global.ui_preferences.preferred_port;
+
+    println!("Starting mapit server on http://127.0.0.1:{port}");
+    if webbrowser::open(&format!("http://127.0.0.1:{port}")).is_ok() {
+        println!("Opened browser. Press Ctrl+C to stop.");
+    } else {
+        println!("Open http://127.0.0.1:{port} in your browser.");
+        println!("Press Ctrl+C to stop.");
+    }
+
+    mapit_server::serve(&db_path, port).await?;
+
     Ok(())
 }
