@@ -1,0 +1,21 @@
+warning: unused import: `mapit_core::config`
+ --> crates/mapit-cli/src/commands/open.rs:3:5
+  |
+3 | use mapit_core::config;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `listener`
+ --> crates/mapit-cli/src/commands/open.rs:9:19
+  |
+9 |         if let Ok(listener) = std::net::TcpListener::bind(addr) {
+  |                   ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_listener`
+  |
+  = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mapit-cli` (bin "mapit") generated 2 warnings (run `cargo fix --bin "mapit" -p mapit-cli` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/mapit open`
+Starting mapit server on http://127.0.0.1:9090
+Opened browser. Press Ctrl+C to stop the server.

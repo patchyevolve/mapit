@@ -8,7 +8,7 @@
 
 use mapit_ai::{
     provider::{AiProvider, AiRequest, AiResponse, ModelInfo},
-    tasks::{self, SummarizeOutput},
+    tasks::{self},
 };
 use mapit_core::graph::{
     builder::{self, FileInput, ParseResult},
@@ -155,7 +155,7 @@ fn summarize_and_persist_round_trip() {
 
 #[test]
 fn dead_code_gating_works_on_fixture() {
-    let (store, nodes) = build_fixture();
+    let (_store, nodes) = build_fixture();
 
     // never_called should be a dead code candidate
     let never_called = nodes

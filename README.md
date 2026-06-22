@@ -1,24 +1,84 @@
-# `mapit` — Project Documentation Set
+# mapit — AI-Powered Interactive Codebase Mapper
 
-This folder contains the complete planning documentation for **`mapit`**, an AI-powered, interactive codebase mapping tool. These documents are written to be handed directly to an AI coding agent (e.g. an opencode-driven model, Claude Code, or similar) so it can build the entire project end-to-end without needing to guess at architecture, data shapes, or scope.
+Run `mapit` inside any project folder. It parses the entire codebase (tree-sitter, not AI-hallucinated), builds a true call/dependency graph and execution-order model, and shows it as an interactive 3D web graph.
 
-## Read order
+## Quick start
 
-| # | Document | What it covers |
-|---|---|---|
-| 0 | [`AGENTS.md`](AGENTS.md) | **Strict rulebook for any coding agent.** Hard "never" rules, phase order, repo layout, compaction-recovery steps. Read this first, every session. |
-| 1 | [`01-PRD.md`](docs/01-PRD.md) | What `mapit` is, who it's for, problem statement, goals, success criteria, explicit non-goals |
-| 2 | [`02-TRD.md`](docs/02-TRD.md) | Full technical architecture: components, tech stack, language adapters, AI provider abstraction, server, storage, security |
-| 3 | [`03-graph-data-model.md`](docs/03-graph-data-model.md) | The exact node/edge/flaw data model, SQLite schema, and JSON contract — the single source of truth for "what is a node" |
-| 4 | [`04-app-flow.md`](docs/04-app-flow.md) | Every CLI command and every web app screen/state, written out concretely with example output |
-| 5 | [`05-backend-schema.md`](docs/05-backend-schema.md) | Exact config file formats and the full REST/WebSocket API contract |
-| 6 | [`06-implementation-plan.md`](docs/06-implementation-plan.md) | Phased build order, repository layout, and "done when" criteria per phase — **the execution checklist** |
-| 7 | [`07-MASTER-AI-PROMPT.md`](docs/07-MASTER-AI-PROMPT.md) | The single prompt to hand a coding agent to start (or resume) the build, with operating rules |
+```bash
+# Build everything (one command):
+cargo build --release
 
-## One-line summary of the product
+# Run in the current folder:
+./target/release/mapit
+```
 
-Run `mapit` inside any project folder, of any size, in any language(s). It parses the entire codebase for real (tree-sitter — never AI-hallucinated structure), builds a true call/dependency graph and execution-order model, uses a configurable AI provider (Ollama by default and local, or any OpenAI-compatible remote/free provider like OpenRouter) to classify the code into features, explain it, and flag dead code/flaws/bugs — then shows the user essential progress and quick answers in the terminal, and the full interactive, zoomable, traceable graph in a local web app it opens automatically.
+This builds the Rust binary + web UI in one step and launches the interactive map.
 
-## How to use this doc set
+On first run, `mapit` prompts for AI provider setup (can skip). Structural mapping (files, symbols, call edges) works without any AI provider.
 
-Place `AGENTS.md` at the repository root — most agentic coding tools (opencode, Claude Code, etc.) scan for it automatically and treat it as standing instructions for every session. It is short and imperative by design, with hard rules and a strict phase order, and it points into the rest of `docs/` only when deeper "why" context is needed. Give the agent `docs/07-MASTER-AI-PROMPT.md` as its initial task prompt for the very first session; after that, `AGENTS.md` alone is enough to keep it on track across every future session, including after context compaction.
+## Requirements
+
+- **Rust** 1.75+ (for building the binary)
+- **Node.js** 18+ (for the web UI — auto-built via `build.rs`)
+
+## CLI commands
+
+| Command | What it does |
+|---|---|
+| `mapit` | Full flow: init (if first run) → map → open browser |
+| `mapit init` | Set up AI provider without mapping yet |
+| `mapit map` | Structural mapping only (no browser) |
+| `mapit map --force` | Force full re-map (ignore cache) |
+| `mapit annotate` | Run AI enrichment against existing map |
+| `mapit open` | Start web server without re-mapping |
+| `mapit status` | Print summary: files, symbols, edges, coverage |
+| `mapit find <name>` | Search symbols by name |
+| `mapit explain <name>` | Show signature, callers, callees, summary |
+| `mapit trace <name> [--depth N]` | Print execution trace from an entry point |
+| `mapit flaws [--severity high|warning|info]` | List AI-flagged issues |
+| `mapit ask "<question>"` | Ask about the codebase |
+| `mapit config show` | Show current config |
+| `mapit config set-provider <ollama|openai-compatible>` | Switch AI provider |
+| `mapit config set-model <model>` | Change AI model |
+
+## Architecture
+
+```
+mapit/
+  crates/
+    mapit-core/    — walker, language adapters, graph builder, SQLite store, CFG
+    mapit-ai/      — AI provider trait, Ollama + OpenAI-compatible, tasks
+    mapit-server/  — REST + WebSocket API, rust-embed web assets
+    mapit-cli/     — binary entry point, all subcommands
+  web/
+    mapit-web/     — React + TypeScript + Tailwind, 3D force graph + ReactFlow
+  docs/            — Full specification documents (AGENTS.md-driven build)
+```
+
+- **6 language adapters:** Rust, C, C++, assembly, Python, JavaScript/TypeScript
+- **Storage:** SQLite via `rusqlite`
+- **Web UI:** Vite + React 19 + react-force-graph-3d + ReactFlow
+- **AI providers:** Ollama (local, default) or any OpenAI-compatible API
+
+## Development
+
+```bash
+# Build just the web UI (for iteration):
+cd web/mapit-web && npm run build
+
+# Build the Rust binary (auto-rebuilds web if dist/ missing):
+cargo build --release
+
+# Run tests:
+cargo test --test phase1_integration
+cargo test --test phase2_integration
+cargo test --test phase3_integration
+cargo test --test phase4_integration
+cargo test --test phase5_integration
+```
+
+All 37 integration tests pass: parsing, graph building, incremental remap, CLI queries, AI task round-trip.
+
+## License
+
+Proprietary — internal tool.

@@ -3,16 +3,55 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use axum::{
+    body::Body,
     extract::State,
+    http::{header, StatusCode, Uri},
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
+use rust_embed::RustEmbed;
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
 pub mod api;
 pub mod state;
+
+#[derive(RustEmbed)]
+#[folder = "../../web/mapit-web/dist"]
+struct WebAssets;
+
+/// Serve a single embedded file, with SPA fallback to index.html.
+async fn serve_static(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() || path == "index.html" {
+        "index.html"
+    } else {
+        path
+    };
+
+    match WebAssets::get(path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            Response::builder()
+                .header(header::CONTENT_TYPE, mime.as_ref())
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(Body::from(content.data))
+                .unwrap()
+        }
+        None => {
+            // SPA fallback: serve index.html for any non-file route
+            match WebAssets::get("index.html") {
+                Some(content) => Response::builder()
+                    .header(header::CONTENT_TYPE, "text/html")
+                    .body(Body::from(content.data))
+                    .unwrap(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    }
+}
 
 /// Start the mapit HTTP server on `127.0.0.1:<port>`.
 /// Blocks until the server shuts down (e.g., via Ctrl+C).
@@ -44,6 +83,7 @@ pub async fn serve(db_path: &Path, port: u16, project_root: Option<&Path>) -> Re
     let app = Router::new()
         .merge(api::routes())
         .route("/api/events", ws_route)
+        .fallback(serve_static)
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 

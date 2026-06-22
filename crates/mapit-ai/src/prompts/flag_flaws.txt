@@ -30,7 +30,7 @@ Respond with a JSON object:
       "severity": "info" | "warning" | "high",
       "description": "what the issue is",
       "confidence": 0.0-1.0,
-      "basis": "structural+ai"
+      "basis": "structural" | "ai" | "structural+ai"
     }
   ]
 }

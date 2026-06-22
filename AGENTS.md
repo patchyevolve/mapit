@@ -26,6 +26,7 @@ Do not start writing code before step 3 is done. Do not trust a chat summary or 
 | `docs/05-backend-schema.md` | Exact config file JSON shapes, exact REST/WebSocket contract |
 | `docs/06-implementation-plan.md` | Repo layout, phase order, "done when" criteria |
 | `docs/07-MASTER-AI-PROMPT.md` | Top-level orientation and operating philosophy |
+| `docs/08-ui-refinement.md` | **Exact visual design system (colors/spacing/states) and the specific frontend defects that must not be reproduced.** Read this before writing or editing any file in `web/mapit-web/src`. |
 
 ---
 

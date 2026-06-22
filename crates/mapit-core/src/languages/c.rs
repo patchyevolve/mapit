@@ -55,6 +55,7 @@ impl LanguageAdapter for CAdapter {
 
 pub(crate) struct CExtractor<'a> {
     pub(crate) source: &'a str,
+    #[allow(dead_code)]
     pub(crate) relative_path: &'a str,
     pub(crate) output: AdapterOutput,
 }

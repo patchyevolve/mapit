@@ -177,7 +177,7 @@ fn setup_openai_compatible(config_dir: &std::path::Path, provider_name: &str) ->
             "OpenRouter".to_owned(),
         ),
         "opencode" => (
-            "https://api.opencode.ai/v1".to_owned(),
+            "https://opencode.ai/zen/v1".to_owned(),
             "Opencode".to_owned(),
         ),
         _ => (String::new(), "custom OpenAI-compatible".to_owned()),

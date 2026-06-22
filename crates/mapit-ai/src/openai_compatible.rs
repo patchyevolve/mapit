@@ -1,3 +1,4 @@
+use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use crate::provider::{AiProvider, AiRequest, AiResponse, ModelInfo};
@@ -42,7 +43,9 @@ impl AiProvider for OpenAiCompatibleProvider {
 
     fn list_models(&self) -> Result<Vec<ModelInfo>> {
         let url = format!("{}/v1/models", self.base_url.trim_end_matches('/'));
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?;
         let resp: OpenAiModelsResponse = client
             .get(&url)
             .bearer_auth(&self.api_key)
@@ -89,7 +92,9 @@ impl AiProvider for OpenAiCompatibleProvider {
             "temperature": 0.1,
         });
 
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()?;
         let resp: ChatCompletionResponse = client
             .post(&url)
             .bearer_auth(&self.api_key)

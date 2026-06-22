@@ -473,6 +473,17 @@ impl GraphStore {
         Ok(results)
     }
 
+    pub fn get_all_edges(&self) -> Result<Vec<Edge>> {
+        let mut stmt = self.conn.prepare("SELECT * FROM edges ORDER BY from_id LIMIT 50000")?;
+        let mut rows = stmt.query([])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let edge = edge_from_row(row).context("edge row deserialization")??;
+            results.push(edge);
+        }
+        Ok(results)
+    }
+
     /// Count of function nodes.
     pub fn function_count(&self) -> Result<u64> {
         let count: i64 = self

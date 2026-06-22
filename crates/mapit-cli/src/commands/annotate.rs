@@ -88,7 +88,13 @@ pub async fn run(target: &Path, all: bool, force: bool) -> Result<()> {
         let start_line = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
         let end_line = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
         let language = base.language.as_deref().unwrap_or("");
-        let source_text = ""; // Not stored in the graph; would need re-reading source
+        // Read the actual source file to give the AI code context
+        let source_text = read_source_snippet(
+            target,
+            base.file_path.as_deref().unwrap_or(""),
+            start_line,
+            end_line,
+        );
         let node_type = format!("{:?}", base.node_type);
 
         // Summarize
@@ -101,7 +107,7 @@ pub async fn run(target: &Path, all: bool, force: bool) -> Result<()> {
             start_line,
             end_line,
             language,
-            source_text,
+            &source_text,
             signature,
             &callers,
             &callees,
@@ -127,60 +133,62 @@ pub async fn run(target: &Path, all: bool, force: bool) -> Result<()> {
             }
         }
 
-        // Flaw-flagging for dead-code candidates
-        if model::is_dead_code_candidate(node) {
-            match tasks::flag_flaws(
-                provider.as_ref(),
-                model,
-                &base.name,
-                base.file_path.as_deref().unwrap_or(""),
-                start_line,
-                end_line,
-                false,
-                false,
-                language,
-                source_text,
-                signature,
-                &callers,
-                &callees,
-            ) {
-                Ok(output) => {
-                    for flaw in &output.flaws {
-                        let flaw_flag = FlawFlag {
-                            id: format!("flaw_{}", base.name),
-                            kind: match flaw.kind.as_str() {
-                                "dead_code" => FlawKind::DeadCode,
-                                "circular_dependency" => FlawKind::CircularDependency,
-                                "structural_smell" => FlawKind::StructuralSmell,
-                                "suspected_bug" => FlawKind::SuspectedBug,
-                                "missing_error_handling" => FlawKind::MissingErrorHandling,
-                                "resource_leak_pattern" => FlawKind::ResourceLeakPattern,
-                                _ => FlawKind::StructuralSmell,
-                            },
-                            severity: match flaw.severity.as_str() {
-                                "info" => FlawSeverity::Info,
-                                "warning" => FlawSeverity::Warning,
-                                "high" => FlawSeverity::High,
-                                _ => FlawSeverity::Warning,
-                            },
-                            description: flaw.description.clone(),
-                            confidence: flaw.confidence,
-                            basis: match flaw.basis.as_str() {
-                                "structural" => FlawBasis::Structural,
-                                "ai" => FlawBasis::Ai,
-                                "structural+ai" => FlawBasis::StructuralPlusAi,
-                                _ => FlawBasis::Structural,
-                            },
-                            related_node_ids: None,
-                        };
-                        if let Err(e) = store.upsert_flaw(&flaw_flag, &base.id) {
-                            eprintln!("Failed to persist flaw for {}: {e}", base.name);
-                        }
+        // Flaw-flagging for all functions (dead_code gated on structural facts
+        // inside the AI prompt — the AI receives has_incoming_calls so it can
+        // make the assessment per 03-graph-data-model.md §3)
+        let has_incoming = match node { Node::Function(f) => f.has_incoming_calls, _ => false };
+        let is_entry = match node { Node::Function(f) => f.is_entry_point_candidate, _ => false };
+        match tasks::flag_flaws(
+            provider.as_ref(),
+            model,
+            &base.name,
+            base.file_path.as_deref().unwrap_or(""),
+            start_line,
+            end_line,
+            has_incoming,
+            is_entry,
+            language,
+            &source_text,
+            signature,
+            &callers,
+            &callees,
+        ) {
+            Ok(output) => {
+                for flaw in &output.flaws {
+                    let flaw_flag = FlawFlag {
+                        id: format!("flaw_{}", base.name),
+                        kind: match flaw.kind.as_str() {
+                            "dead_code" => FlawKind::DeadCode,
+                            "circular_dependency" => FlawKind::CircularDependency,
+                            "structural_smell" => FlawKind::StructuralSmell,
+                            "suspected_bug" => FlawKind::SuspectedBug,
+                            "missing_error_handling" => FlawKind::MissingErrorHandling,
+                            "resource_leak_pattern" => FlawKind::ResourceLeakPattern,
+                            _ => FlawKind::StructuralSmell,
+                        },
+                        severity: match flaw.severity.as_str() {
+                            "info" => FlawSeverity::Info,
+                            "warning" => FlawSeverity::Warning,
+                            "high" => FlawSeverity::High,
+                            _ => FlawSeverity::Warning,
+                        },
+                        description: flaw.description.clone(),
+                        confidence: flaw.confidence,
+                        basis: match flaw.basis.as_str() {
+                            "structural" => FlawBasis::Structural,
+                            "ai" => FlawBasis::Ai,
+                            "structural+ai" => FlawBasis::StructuralPlusAi,
+                            _ => FlawBasis::Structural,
+                        },
+                        related_node_ids: None,
+                    };
+                    if let Err(e) = store.upsert_flaw(&flaw_flag, &base.id) {
+                        eprintln!("Failed to persist flaw for {}: {e}", base.name);
                     }
                 }
-                Err(e) => {
-                    eprintln!("AI flaw-flagging failed for {}: {e}", base.name);
-                }
+            }
+            Err(e) => {
+                eprintln!("AI flaw-flagging failed for {}: {e}", base.name);
             }
         }
 
@@ -193,6 +201,29 @@ pub async fn run(target: &Path, all: bool, force: bool) -> Result<()> {
         annotated_count, failed_count
     );
     Ok(())
+}
+
+/// Read source code for a function from disk (line range, 0-indexed stored as 1-indexed).
+fn read_source_snippet(project_root: &Path, file_path: &str, start_line: u32, end_line: u32) -> String {
+    if file_path.is_empty() || start_line == 0 || end_line == 0 {
+        return String::new();
+    }
+    let full_path = project_root.join(file_path);
+    match std::fs::read_to_string(&full_path) {
+        Ok(content) => {
+            let lines: Vec<&str> = content.lines().collect();
+            let start = (start_line.saturating_sub(1)) as usize;
+            let end = (end_line as usize).min(lines.len());
+            if start >= end {
+                return String::new();
+            }
+            lines[start..end].join("\n")
+        }
+        Err(e) => {
+            eprintln!("Warning: could not read {}: {e}", full_path.display());
+            String::new()
+        }
+    }
 }
 
 fn create_provider(

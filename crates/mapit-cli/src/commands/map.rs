@@ -331,17 +331,12 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
 }
 
 fn ensure_gitignore(project_root: &Path) -> Result<()> {
-    let gi_path = project_root.join(".gitignore");
-    let entry = "\n# mapit metadata\n.mapit/\n";
-    if gi_path.exists() {
-        let content = std::fs::read_to_string(&gi_path)?;
-        if !content.contains(".mapit") {
-            let mut f = std::fs::OpenOptions::new().append(true).open(&gi_path)?;
-            use std::io::Write;
-            f.write_all(entry.as_bytes())?;
-        }
-    } else {
-        std::fs::write(&gi_path, "# mapit metadata\n.mapit/\n")?;
+    // Write .gitignore inside .mapit/ instead of modifying user's root .gitignore.
+    // This achieves the same effect (git ignores .mapit's contents) without touching
+    // the user's source tree, per AGENTS.md "never write into source tree" rule.
+    let mapit_gitignore = project_root.join(".mapit").join(".gitignore");
+    if !mapit_gitignore.exists() {
+        std::fs::write(&mapit_gitignore, "# mapit metadata directory — all contents auto-generated\n*\n")?;
     }
     Ok(())
 }

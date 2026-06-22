@@ -5,7 +5,7 @@ use mapit_core::graph::store::GraphStore;
 pub async fn run(target: &Path, severity: Option<&str>) -> Result<()> {
     let db_path = target.join(".mapit").join("graph.sqlite");
     if !db_path.exists() {
-        println!("No map found. Run `mapit map` AI pass first.");
+        println!("No map found. Run `mapit map` first, then `mapit annotate` to detect flaws.");
         return Ok(());
     }
 
