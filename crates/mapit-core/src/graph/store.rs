@@ -353,12 +353,52 @@ impl GraphStore {
         Ok(None)
     }
 
+    pub fn manifest_entry_count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM files_manifest", [], |row| row.get(0))?;
+        Ok(count as u64)
+    }
+
     pub fn delete_manifest_entry(&self, file_path: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM files_manifest WHERE file_path = ?1",
             params![file_path],
         )?;
         Ok(())
+    }
+
+    /// Return all manifest entries — used to rebuild manifest.json from SQLite.
+    pub fn all_manifest_entries(
+        &self,
+    ) -> Result<Vec<(String, crate::graph::incremental::ManifestEntry)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, content_hash, language, last_parsed_at, parse_status
+             FROM files_manifest",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            let (path, hash, lang, parsed_at, status) = row?;
+            result.push((
+                path,
+                crate::graph::incremental::ManifestEntry {
+                    content_hash: hash,
+                    language: lang,
+                    last_parsed_at: parsed_at,
+                    parse_status: status,
+                },
+            ));
+        }
+        Ok(result)
     }
 
     /// Update has_incoming_calls for all function nodes based on edge data.

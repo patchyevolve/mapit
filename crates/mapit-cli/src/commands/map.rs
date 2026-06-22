@@ -1,4 +1,4 @@
-//! `mapit map [--force]` — structural mapping pass.
+//! `mapit map [--force]` — structural mapping pass with incremental support.
 
 use std::path::Path;
 
@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 use mapit_core::{
     graph::{
         builder::{self, FileInput, ParseResult},
+        incremental::{diff_manifest, load_manifest, save_manifest, rebuild_manifest_from_store},
         store::GraphStore,
     },
     languages::adapter_for_language,
@@ -32,69 +33,128 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
     // Walk the directory
     println!("Scanning project structure...");
     let source_files = walker::walk(target, &extra_ignores)?;
-    println!(
-        "  {} source files found",
-        source_files.len()
-    );
+    println!("  {} source files found", source_files.len());
 
-    // Build file inputs, checking incremental manifest unless --force
-    let mut file_inputs: Vec<FileInput> = Vec::new();
-    let mut changed_count = 0usize;
-    let mut unchanged_count = 0usize;
+    // --- Incremental: load manifest.json, validate against SQLite ---
+    let manifest = if force {
+        // Force full re-map — ignore existing manifest
+        mapit_core::graph::incremental::ManifestFile::new()
+    } else {
+        let json_manifest = load_manifest(&mapit_dir).unwrap_or_default();
+        // Validate: if SQLite has entries and manifest is empty (e.g. crash mid-write),
+        // rebuild manifest from SQLite (doc §5 mismatch recovery rule).
+        let db_entry_count = store.manifest_entry_count()?;
+        if db_entry_count > 0 && json_manifest.files.is_empty() {
+            warn!("manifest.json is empty but SQLite has {db_entry_count} entries — rebuilding from DB");
+            rebuild_manifest_from_store(&mapit_dir, &store).unwrap_or(json_manifest)
+        } else {
+            json_manifest
+        }
+    };
+
+    // Compute current content hashes
+    let mut current_hashes = std::collections::HashMap::new();
+    // Also keep content strings alive for FileInput refs
+    let mut contents: Vec<(String, String)> = Vec::new(); // (relative_path, content)
 
     for sf in &source_files {
-        let content = match std::fs::read_to_string(&sf.path) {
-            Ok(c) => c,
+        match std::fs::read_to_string(&sf.path) {
+            Ok(c) => {
+                let hash = {
+                    let h = Sha256::digest(c.as_bytes());
+                    hex::encode(&h[..16])
+                };
+                current_hashes.insert(sf.relative_path.clone(), hash);
+                contents.push((sf.relative_path.clone(), c));
+            }
             Err(e) => {
                 warn!("Cannot read {}: {e} — skipping", sf.relative_path);
-                file_inputs.push(FileInput {
-                    relative_path: &sf.relative_path,
-                    language: &sf.language,
-                    size_bytes: sf.size_bytes,
-                    parse_result: ParseResult::Failed {
-                        error: e.to_string(),
-                    },
-                });
-                continue;
-            }
-        };
-
-        let hash = {
-            let h = Sha256::digest(content.as_bytes());
-            hex::encode(&h[..16])
-        };
-
-        // Check if unchanged
-        if !force {
-            if let Ok(Some(stored_hash)) = store.get_manifest_hash(&sf.relative_path) {
-                if stored_hash == hash {
-                    unchanged_count += 1;
-                    file_inputs.push(FileInput {
-                        relative_path: &sf.relative_path,
-                        language: &sf.language,
-                        size_bytes: sf.size_bytes,
-                        parse_result: ParseResult::Unchanged,
-                    });
-                    continue;
-                }
+                contents.push((sf.relative_path.clone(), String::new()));
             }
         }
+    }
 
-        // Parse the file
-        changed_count += 1;
+    // Diff against stored manifest
+    let diff = diff_manifest(&current_hashes, &manifest);
+    let changed = mapit_core::graph::incremental::changed_count(&diff);
+    let unchanged = diff.values().filter(|s| **s == mapit_core::graph::incremental::FileStatus::Unchanged).count();
+
+    if !force && unchanged > 0 {
+        println!("  {unchanged} files unchanged · {changed} files to (re)parse");
+    }
+
+    // Build content map for O(1) lookup
+    let content_map: std::collections::HashMap<&str, &str> = contents
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
+
+    // Build FileInputs
+    let mut file_inputs: Vec<FileInput> = Vec::new();
+    let mut parsed_count = 0usize;
+    let mut new_manifest = manifest.clone();
+
+    for sf in &source_files {
+        let status = diff.get(&sf.relative_path)
+            .cloned()
+            .unwrap_or(mapit_core::graph::incremental::FileStatus::Added);
+
+        let content = content_map.get(sf.relative_path.as_str()).copied().unwrap_or("");
+
+        if !force && status == mapit_core::graph::incremental::FileStatus::Unchanged {
+            file_inputs.push(FileInput {
+                relative_path: &sf.relative_path,
+                language: &sf.language,
+                size_bytes: sf.size_bytes,
+                parse_result: ParseResult::Unchanged,
+                source: None,
+            });
+            continue;
+        }
+
+        // Delete prior graph data for modified/added files
+        store.delete_edges_for_file(&sf.relative_path)?;
+        store.delete_nodes_for_file(&sf.relative_path)?;
+
+        if content.is_empty() {
+            file_inputs.push(FileInput {
+                relative_path: &sf.relative_path,
+                language: &sf.language,
+                size_bytes: sf.size_bytes,
+                parse_result: ParseResult::Failed { error: "could not read file".into() },
+                source: None,
+            });
+            continue;
+        }
+
+        parsed_count += 1;
+        let hash = current_hashes.get(&sf.relative_path).cloned().unwrap_or_default();
+
         let parse_result = match adapter_for_language(&sf.language) {
             None => {
-                store.upsert_manifest_entry(
-                    &sf.relative_path,
-                    &hash,
-                    Some(&sf.language),
-                    "unsupported",
-                    None,
-                )?;
+                new_manifest.files.insert(
+                    sf.relative_path.clone(),
+                    mapit_core::graph::incremental::ManifestEntry {
+                        content_hash: hash,
+                        language: Some(sf.language.clone()),
+                        last_parsed_at: chrono::Utc::now().to_rfc3339(),
+                        parse_status: "unsupported".into(),
+                    },
+                );
                 ParseResult::Unsupported
             }
-            Some(adapter) => match adapter.extract(&sf.relative_path, &content) {
+            Some(adapter) => match adapter.extract(&sf.relative_path, content) {
                 Ok(output) => {
+                    new_manifest.files.insert(
+                        sf.relative_path.clone(),
+                        mapit_core::graph::incremental::ManifestEntry {
+                            content_hash: hash.clone(),
+                            language: Some(sf.language.clone()),
+                            last_parsed_at: chrono::Utc::now().to_rfc3339(),
+                            parse_status: "ok".into(),
+                        },
+                    );
+                    // Keep SQLite manifest in sync too
                     store.upsert_manifest_entry(
                         &sf.relative_path,
                         &hash,
@@ -107,6 +167,15 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
                 Err(e) => {
                     let err_str = e.to_string();
                     error!("Parse failed for {}: {err_str}", sf.relative_path);
+                    new_manifest.files.insert(
+                        sf.relative_path.clone(),
+                        mapit_core::graph::incremental::ManifestEntry {
+                            content_hash: hash.clone(),
+                            language: Some(sf.language.clone()),
+                            last_parsed_at: chrono::Utc::now().to_rfc3339(),
+                            parse_status: "parse_failed".into(),
+                        },
+                    );
                     store.upsert_manifest_entry(
                         &sf.relative_path,
                         &hash,
@@ -124,31 +193,24 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
             language: &sf.language,
             size_bytes: sf.size_bytes,
             parse_result,
+            source: Some(content),
         });
     }
 
-    if !force && unchanged_count > 0 {
-        println!(
-            "  {unchanged_count} files unchanged · {changed_count} files to (re)parse"
-        );
-    }
-
-    // For changed files: delete their prior nodes/edges from the store
-    for fi in &file_inputs {
-        match &fi.parse_result {
-            ParseResult::Unchanged => continue,
-            _ => {
-                store.delete_edges_for_file(fi.relative_path)?;
-                store.delete_nodes_for_file(fi.relative_path)?;
-            }
+    // Remove deleted files from manifest and store
+    for (path, status) in &diff {
+        if *status == mapit_core::graph::incremental::FileStatus::Deleted {
+            store.delete_edges_for_file(path)?;
+            store.delete_nodes_for_file(path)?;
+            store.delete_manifest_entry(path)?;
+            new_manifest.files.remove(path);
         }
     }
 
-    // Build the graph
+    // Build graph from parsed files
     println!("Building graph...");
     let build_output = builder::build(&file_inputs)?;
 
-    // Persist nodes and edges
     for node in &build_output.nodes {
         if let Err(e) = store.upsert_node(node) {
             error!("Failed to persist node {}: {e}", node.id());
@@ -160,30 +222,36 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
         }
     }
 
-    // Recompute has_incoming_calls for all function nodes
     store.recompute_incoming_calls()?;
+
+    // Atomically save updated manifest.json
+    save_manifest(&mapit_dir, &new_manifest)?;
 
     let node_count = store.node_count()?;
     let edge_count = store.edge_count()?;
 
-    println!(
-        "✓ Structural mapping complete\n  {} nodes · {} edges",
-        node_count, edge_count
-    );
+    if parsed_count > 0 || force {
+        println!("✓ Structural mapping complete\n  {} nodes · {} edges", node_count, edge_count);
+    } else {
+        println!("✓ Already up to date ({} nodes · {} edges)", node_count, edge_count);
+    }
 
     // Update project config timestamps
     let mut cfg = mapit_core::config::load_project_config(&mapit_dir).unwrap_or_default();
-    cfg.last_full_map_at = Some(chrono::Utc::now().to_rfc3339());
+    if force || cfg.last_full_map_at.is_none() {
+        cfg.last_full_map_at = Some(chrono::Utc::now().to_rfc3339());
+    } else {
+        cfg.last_incremental_map_at = Some(chrono::Utc::now().to_rfc3339());
+    }
     mapit_core::config::save_project_config(&mapit_dir, &cfg)?;
 
-    info!("map complete: {node_count} nodes, {edge_count} edges");
+    info!("map complete: {node_count} nodes, {edge_count} edges, {parsed_count} files parsed");
     Ok(())
 }
 
 fn ensure_gitignore(project_root: &Path) -> Result<()> {
     let gi_path = project_root.join(".gitignore");
     let entry = "\n# mapit metadata\n.mapit/\n";
-
     if gi_path.exists() {
         let content = std::fs::read_to_string(&gi_path)?;
         if !content.contains(".mapit") {
@@ -192,7 +260,7 @@ fn ensure_gitignore(project_root: &Path) -> Result<()> {
             f.write_all(entry.as_bytes())?;
         }
     } else {
-        std::fs::write(&gi_path, format!("# mapit metadata\n.mapit/\n"))?;
+        std::fs::write(&gi_path, "# mapit metadata\n.mapit/\n")?;
     }
     Ok(())
 }

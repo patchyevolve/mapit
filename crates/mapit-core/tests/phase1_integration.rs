@@ -55,6 +55,7 @@ fn build_fixture() -> (Vec<Node>, Vec<mapit_core::graph::model::Edge>) {
             language: fix.language,
             size_bytes: fix.source.len() as u64,
             parse_result: ParseResult::Ok(output),
+            source: Some(fix.source),
         });
     }
 
@@ -142,6 +143,7 @@ fn never_called_has_no_incoming_calls_in_store() {
             language: fix.language,
             size_bytes: fix.source.len() as u64,
             parse_result: ParseResult::Ok(output),
+            source: Some(fix.source),
         });
     }
 

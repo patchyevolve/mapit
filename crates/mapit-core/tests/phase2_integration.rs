@@ -36,6 +36,7 @@ fn parse_file(language: &str, relative_path: &str, source: &str) -> FileInput<'s
         language,
         size_bytes: source.len() as u64,
         parse_result,
+        source: Some(source),
     }
 }
 

@@ -102,6 +102,18 @@ pub trait LanguageAdapter: Send + Sync {
     /// A parse failure here degrades to `ParseStatus::ParseFailed` for
     /// the file; it must never abort the whole mapping run (TRD §9).
     fn extract(&self, relative_path: &str, source: &str) -> Result<AdapterOutput>;
+
+    /// Whether this adapter supports control-flow extraction (Phase 3).
+    /// Default: false. Override in Rust and C adapters.
+    fn supports_cfg(&self) -> bool {
+        false
+    }
+
+    /// The CfgLanguage variant for this adapter (only meaningful if
+    /// `supports_cfg()` returns true).
+    fn cfg_language(&self) -> Option<crate::control_flow::CfgLanguage> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,12 @@ impl LanguageAdapter for RustAdapter {
         &["rs"]
     }
 
+    fn supports_cfg(&self) -> bool { true }
+
+    fn cfg_language(&self) -> Option<crate::control_flow::CfgLanguage> {
+        Some(crate::control_flow::CfgLanguage::Rust)
+    }
+
     fn extract(&self, relative_path: &str, source: &str) -> Result<AdapterOutput> {
         let mut parser = Parser::new();
         parser

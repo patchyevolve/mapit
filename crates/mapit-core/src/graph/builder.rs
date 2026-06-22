@@ -7,6 +7,7 @@ use anyhow::Result;
 use tracing::{debug, warn};
 
 use crate::languages::{AdapterOutput, ImportKind, SymbolKind};
+use crate::control_flow::{CfgLanguage, extract_cfg};
 
 use super::model::{
     AiSummaryStatus, BaseNode, Edge, EdgeConfidence, EdgeType, ExternalNode, ExternalReason,
@@ -23,6 +24,9 @@ pub struct FileInput<'a> {
     pub language: &'a str,
     pub size_bytes: u64,
     pub parse_result: ParseResult<'a>,
+    /// Original source text — needed for CFG extraction.
+    /// If None, CFG extraction is skipped for this file.
+    pub source: Option<&'a str>,
 }
 
 pub enum ParseResult<'a> {
@@ -113,13 +117,21 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
             };
 
             let node = match def.kind {
-                SymbolKind::Function | SymbolKind::Method => Node::Function(FunctionNode {
-                    base,
-                    signature: def.signature.clone(),
-                    is_entry_point_candidate: def.is_entry_point_candidate,
-                    has_incoming_calls: false, // recomputed by store after full build
-                    control_flow: None,
-                }),
+                SymbolKind::Function | SymbolKind::Method => {
+                    // Extract CFG if the language supports it and source is available
+                    let cfg = extract_function_cfg(
+                        file.language,
+                        &def.source_text,
+                        &node_id,
+                    );
+                    Node::Function(FunctionNode {
+                        base,
+                        signature: def.signature.clone(),
+                        is_entry_point_candidate: def.is_entry_point_candidate,
+                        has_incoming_calls: false,
+                        control_flow: cfg,
+                    })
+                },
                 SymbolKind::Type => Node::TypeNode(base),
                 SymbolKind::Macro => Node::Macro(base),
                 SymbolKind::Global => Node::Global(base),
@@ -463,6 +475,35 @@ fn build_file_node(file: &FileInput) -> Node {
 }
 
 // ---------------------------------------------------------------------------
+// CFG extraction helper
+// ---------------------------------------------------------------------------
+
+/// Try to extract a CFG for a function. Returns None on failure or unsupported
+/// language — CFG extraction failure must never abort the build (TRD §9).
+fn extract_function_cfg(
+    language: &str,
+    function_source: &str,
+    node_id: &str,
+) -> Option<crate::graph::model::ControlFlowGraph> {
+    let lang = match language {
+        "rust" => CfgLanguage::Rust,
+        "c" => CfgLanguage::C,
+        _ => return None,
+    };
+    // Only extract if the source looks like a function body (contains braces)
+    if !function_source.contains('{') {
+        return None;
+    }
+    match extract_cfg(lang, function_source, node_id) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            tracing::debug!("CFG extraction failed for {node_id}: {e}");
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -483,6 +524,7 @@ mod tests {
             language: lang,
             size_bytes: 0,
             parse_result: ParseResult::Ok(output),
+            source: None,
         }
     }
 
