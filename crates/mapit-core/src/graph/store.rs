@@ -252,6 +252,20 @@ impl GraphStore {
         self.query_edges("SELECT * FROM edges WHERE to_id = ?1", node_id)
     }
 
+    /// Get a single edge by ID.
+    pub fn get_edge(&self, edge_id: &str) -> Result<Option<Edge>> {
+        let mut stmt = self.conn.prepare("SELECT * FROM edges WHERE id = ?1")?;
+        let mut rows = stmt.query(params![edge_id])?;
+        match rows.next()? {
+            Some(row) => {
+                let edge = edge_from_row(row)?
+                    .map_err(|e| anyhow::anyhow!("edge deserialization: {e}"))?;
+                Ok(Some(edge))
+            }
+            None => Ok(None),
+        }
+    }
+
     fn query_edges(&self, sql: &str, id: &str) -> Result<Vec<Edge>> {
         let mut stmt = self.conn.prepare(sql)?;
         let mut rows = stmt.query(params![id])?;
@@ -468,6 +482,30 @@ impl GraphStore {
                 [],
                 |row| row.get(0),
             )?;
+        Ok(count as u64)
+    }
+
+    /// Get distinct languages present in the graph.
+    pub fn get_distinct_languages(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut langs = Vec::new();
+        for row in rows {
+            langs.push(row?);
+        }
+        langs.sort();
+        Ok(langs)
+    }
+
+    /// Count how many function nodes have a non-null ai_summary.
+    pub fn annotated_function_count(&self) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE type = 'function' AND ai_summary IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
         Ok(count as u64)
     }
 

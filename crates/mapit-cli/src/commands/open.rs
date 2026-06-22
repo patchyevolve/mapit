@@ -23,7 +23,7 @@ pub async fn run(target: &Path) -> Result<()> {
         println!("Press Ctrl+C to stop the server.");
     }
 
-    mapit_server::serve(&db_path, port).await
+    mapit_server::serve(&db_path, port, Some(target)).await
         .context("server error")?;
 
     Ok(())

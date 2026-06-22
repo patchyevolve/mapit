@@ -79,18 +79,39 @@ async fn project_handler(
     let store = state.store.lock().map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
     })?;
-    let node_count = store.node_count().unwrap_or(0);
+    let file_count = store.manifest_entry_count().unwrap_or(0);
+    let symbol_count = store.node_count().unwrap_or(0);
     let edge_count = store.edge_count().unwrap_or(0);
     let func_count = store.function_count().unwrap_or(0);
+    let annotated = store.annotated_function_count().unwrap_or(0);
+    let languages = store.get_distinct_languages().unwrap_or_default();
     let flaw_count = store.flaw_count(None).unwrap_or(0);
+
+    let ai_coverage = if func_count > 0 {
+        (annotated as f64 / func_count as f64 * 100.0 * 10.0).round() / 10.0
+    } else {
+        0.0
+    };
+
+    // Read project config for timestamps
+    let project_cfg = mapit_core::config::load_project_config(&state.mapit_dir).unwrap_or_default();
+
+    let config_dir = mapit_core::config::global_config_dir();
+    let global = mapit_core::config::load_global_config(&config_dir).unwrap_or_default();
+
     Ok(Json(json!({
-        "project_root": "",
-        "node_count": node_count,
+        "project_root": state.project_root.to_string_lossy(),
+        "last_full_map_at": project_cfg.last_full_map_at,
+        "last_incremental_map_at": project_cfg.last_incremental_map_at,
+        "file_count": file_count,
+        "symbol_count": symbol_count,
         "function_count": func_count,
-        "edge_count": edge_count,
         "flaw_count": flaw_count,
-        "provider": "ollama",
-        "model": "qwen2.5-coder:7b"
+        "edge_count": edge_count,
+        "languages": languages,
+        "provider": global.default_provider,
+        "model": global.default_model,
+        "ai_annotation_coverage_pct": ai_coverage,
     })))
 }
 
@@ -198,12 +219,19 @@ async fn trace_handler(
                     Err(_) => continue,
                 };
                 let block = cfg.blocks.get(idx);
+                // Resolve edge_ids to full node objects for the frontend
+                let calls: Vec<Value> = block.map(|b| {
+                    b.calls_in_block.iter().filter_map(|c| {
+                        let edge = store.get_edge(&c.edge_id).ok().flatten()?;
+                        store.get_node(&edge.to_id).ok().flatten().map(|n| {
+                            json!({ "node": serialize_node(&n), "order_hint": c.order_hint })
+                        })
+                    }).collect()
+                }).unwrap_or_default();
                 steps.push(json!({
                     "block_id": block_id,
                     "label": &path.label,
-                    "calls": block.map(|b| b.calls_in_block.iter().map(|c| {
-                        json!({ "edge_id": c.edge_id, "order_hint": c.order_hint })
-                    }).collect::<Vec<_>>()).unwrap_or_default(),
+                    "calls": calls,
                     "branches": block.map(|b| b.next_blocks.iter().map(|t| {
                         json!({ "condition": t.condition, "next_block_id": t.block_id })
                     }).collect::<Vec<_>>()).unwrap_or_default()
@@ -317,6 +345,9 @@ async fn put_config_handler(
     }
     if let Some(ref u) = body.base_url {
         global.ollama_base_url = u.clone();
+    }
+    if let Some(patterns) = body.extra_ignore_patterns {
+        global.default_ignore_patterns = patterns;
     }
     mapit_core::config::save_global_config(&config_dir, &global)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use mapit_core::graph::store::GraphStore;
@@ -7,6 +8,8 @@ pub struct AppState {
     pub store: Arc<Mutex<GraphStore>>,
     pub ws_tx: broadcast::Sender<String>,
     pub progress: Arc<Mutex<ProgressState>>,
+    pub project_root: PathBuf,
+    pub mapit_dir: PathBuf,
 }
 
 #[derive(Clone, Debug)]

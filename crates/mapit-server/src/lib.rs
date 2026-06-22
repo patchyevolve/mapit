@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -16,17 +16,22 @@ pub mod state;
 
 /// Start the mapit HTTP server on `127.0.0.1:<port>`.
 /// Blocks until the server shuts down (e.g., via Ctrl+C).
-pub async fn serve(db_path: &Path, port: u16) -> Result<()> {
+pub async fn serve(db_path: &Path, port: u16, project_root: Option<&Path>) -> Result<()> {
     let store = mapit_core::graph::store::GraphStore::open(db_path)
         .with_context(|| format!("opening graph store at {}", db_path.display()))?;
     let store = Arc::new(Mutex::new(store));
 
     let (ws_tx, _) = broadcast::channel(256);
 
+    let root = project_root.map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let mapit_dir = db_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".mapit"));
+
     let app_state = Arc::new(state::AppState {
         store,
         ws_tx: ws_tx.clone(),
         progress: Arc::new(Mutex::new(state::ProgressState::default())),
+        project_root: root,
+        mapit_dir,
     });
 
     let ws_route = get(move |ws: axum::extract::ws::WebSocketUpgrade, State(state): State<Arc<state::AppState>>| async move {
