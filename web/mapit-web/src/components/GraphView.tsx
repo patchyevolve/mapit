@@ -138,7 +138,7 @@ export function GraphView({ nodes, edges, onNodeClick, onBackgroundClick, highli
   }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full" style={{ background: "#0b0d12" }}>
+    <div ref={containerRef} className="w-full h-full relative z-0" style={{ background: "#0b0d12" }}>
       <ForceGraph2D
         graphData={graphData}
         width={dimensions.width}

@@ -13,6 +13,7 @@ export const initialState: AppState = {
   searchResults: [],
   wsConnected: false,
   mapProgress: null,
+  bgProgress: null,
 };
 
 export type AppAction =
@@ -27,7 +28,14 @@ export type AppAction =
   | { type: "SET_FLAWS"; flaws: import("./types").FlawEntry[] }
   | { type: "SET_SEARCH"; results: import("./types").SearchResult[] }
   | { type: "SET_WS_CONNECTED"; connected: boolean }
-  | { type: "SET_MAP_PROGRESS"; progress: AppState["mapProgress"] };
+  | { type: "SET_MAP_PROGRESS"; progress: AppState["mapProgress"] }
+  | { type: "SET_BG_PROGRESS"; progress: AppState["bgProgress"] }
+  | {
+      type: "TICK_BG_PROGRESS";
+      current: number;
+      total: number;
+      currentFile?: string;
+    };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -58,6 +66,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, wsConnected: action.connected };
     case "SET_MAP_PROGRESS":
       return { ...state, mapProgress: action.progress };
+    case "SET_BG_PROGRESS":
+      return { ...state, bgProgress: action.progress };
+    case "TICK_BG_PROGRESS":
+      // Only tick if bgProgress exists — WS events during initial load won't create a panel
+      if (!state.bgProgress) return state;
+      return {
+        ...state,
+        bgProgress: {
+          ...state.bgProgress,
+          current: action.current,
+          total: action.total > 0 ? action.total : state.bgProgress.total,
+          currentFile: action.currentFile,
+        },
+      };
     default:
       return state;
   }

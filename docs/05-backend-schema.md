@@ -188,6 +188,17 @@ Base URL: `http://127.0.0.1:<port>/api`
 ### `GET /api/graph/search?q=<term>&limit=N`
 **Response 200:** `{ "results": [ { "node": { /* Node */ }, "match_reason": "name" | "file_path" | "ai_summary" } ] }`, ranked best-match-first.
 
+### `GET /api/source?file=<relative_path>&start=<line>&end=<line>`
+Serves the raw source content of a file within the project for display in the code viewer. `file` must be a project-relative path (e.g., `src/main.rs`). `start` and `end` are 1-indexed line numbers (inclusive). Both are optional; if omitted, the whole file is returned (not recommended for large files — the frontend should always pass a tight range around the function's span).
+
+**Security invariant:** the server validates that the resolved absolute path is a descendant of `project_root` — paths containing `..` or resolving outside the project root are rejected with 400.
+
+**Response 200:**
+```json
+{ "content": "fn foo(x: i32) -> bool {\n    ...\n}", "language": "rs", "start_line": 10, "end_line": 25 }
+```
+**400** `{ "error": "invalid_path" }` if traversal attempt or absolute path. **404** if file not found.
+
 ### `POST /api/ask`
 **Request:**
 ```json
@@ -208,6 +219,36 @@ If `grounding_status` is `no_relevant_context_found`, `answer` must explicitly s
 
 ### `PUT /api/config`
 **Request:** any subset of `{ provider, model, base_url, api_key, extra_ignore_patterns }`. **Response 200:** updated config (redacted). On invalid provider/model combination, **400** with a specific `error` field.
+
+### `POST /api/config/test-connection`
+Tests the currently-saved provider configuration by calling the provider's model-list endpoint and measuring round-trip latency. Saves any pending config changes first if passed in the request body.
+
+**Request:** `{}` (empty — uses the already-saved config)
+
+**Response 200 (success):**
+```json
+{ "ok": true, "message": "Connected · 15 models available", "latency_ms": 142, "models": ["llama3:8b", "qwen2.5-coder:7b"] }
+```
+
+**Response 200 (failure — not a server error, just a bad connection):**
+```json
+{ "ok": false, "message": "Connection refused (http://localhost:11434)", "latency_ms": null, "models": [] }
+```
+
+### `POST /api/config/test-chat`
+Sends a single test message through the currently-saved configuration to verify the model can generate output.
+
+**Request:** `{ "message": "Respond with exactly one word: OK" }`
+
+**Response 200 (success):**
+```json
+{ "ok": true, "response": "OK", "latency_ms": 1234 }
+```
+
+**Response 200 (failure — provider error, not a server error):**
+```json
+{ "ok": false, "error": "model 'llama3:8b' not found", "latency_ms": null }
+```
 
 ### `POST /api/remap`
 **Request:** `{ "force": false }` (optional, default false). **Response 202 Accepted** immediately (work proceeds async; progress via WebSocket): `{ "status": "started", "mode": "incremental" | "full" }`.

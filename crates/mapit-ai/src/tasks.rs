@@ -51,7 +51,20 @@ pub fn summarize(
     };
 
     let response = try_complete(provider, &request)?;
-    parse_json(&response.content)
+    // Try strict JSON parse first; fall back to using raw text as the summary.
+    // Some smaller/free models return plain text instead of JSON — that’s still
+    // useful as a summary and must not mark the node Unavailable.
+    match parse_json::<SummarizeOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(_) => {
+            let raw = response.content.trim().to_string();
+            if raw.len() > 5 {
+                Ok(SummarizeOutput { summary: raw })
+            } else {
+                anyhow::bail!("summarize: response too short to use as summary")
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +146,10 @@ pub fn flag_flaws(
         .replace("{{start_line}}", &start_line.to_string())
         .replace("{{end_line}}", &end_line.to_string())
         .replace("{{has_incoming_calls}}", &has_incoming_calls.to_string())
-        .replace("{{is_entry_point_candidate}}", &is_entry_point_candidate.to_string())
+        .replace(
+            "{{is_entry_point_candidate}}",
+            &is_entry_point_candidate.to_string(),
+        )
         .replace("{{language}}", language)
         .replace("{{source_text}}", source_text)
         .replace("{{signature}}", signature)
@@ -148,7 +164,15 @@ pub fn flag_flaws(
     };
 
     let response = try_complete(provider, &request)?;
-    parse_json(&response.content)
+    // flag_flaws must never hard-fail the annotation run — if JSON parse fails,
+    // return empty flaws (degraded-but-alive per AGENTS.md §2).
+    match parse_json::<FlagFlawsOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            error!("flag_flaws parse failed (returning empty): {e:#}");
+            Ok(FlagFlawsOutput { flaws: vec![] })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,11 +264,25 @@ mod tests {
         let provider = MockProvider {
             response: r#"{"summary": "This function computes the answer."}"#.into(),
         };
-        let result = summarize(&provider, "test", "compute", "Function",
-            "src/lib.rs", 1, 10, "rust", "fn compute() {}", "fn compute()",
-            &[], &["other".to_string()]);
+        let result = summarize(
+            &provider,
+            "test",
+            "compute",
+            "Function",
+            "src/lib.rs",
+            1,
+            10,
+            "rust",
+            "fn compute() {}",
+            "fn compute()",
+            &[],
+            &["other".to_string()],
+        );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().summary, "This function computes the answer.");
+        assert_eq!(
+            result.unwrap().summary,
+            "This function computes the answer."
+        );
     }
 
     #[test]
@@ -252,9 +290,20 @@ mod tests {
         let provider = MockProvider {
             response: r#"Some text before {"summary": "extracted from braces"} trailing"#.into(),
         };
-        let result = summarize(&provider, "test", "foo", "Function",
-            "src/lib.rs", 1, 1, "rust", "fn foo() {}", "fn foo()",
-            &[], &[]);
+        let result = summarize(
+            &provider,
+            "test",
+            "foo",
+            "Function",
+            "src/lib.rs",
+            1,
+            1,
+            "rust",
+            "fn foo() {}",
+            "fn foo()",
+            &[],
+            &[],
+        );
         assert!(result.is_ok());
         assert_eq!(result.unwrap().summary, "extracted from braces");
     }
@@ -264,9 +313,21 @@ mod tests {
         let provider = MockProvider {
             response: r#"{"flaws": [{"kind": "dead_code", "severity": "warning", "description": "unused function", "confidence": 0.9, "basis": "structural+ai"}]}"#.into(),
         };
-        let result = flag_flaws(&provider, "test", "unused", "src/lib.rs",
-            1, 1, false, false, "rust", "fn unused() {}", "fn unused()",
-            &[], &[]);
+        let result = flag_flaws(
+            &provider,
+            "test",
+            "unused",
+            "src/lib.rs",
+            1,
+            1,
+            false,
+            false,
+            "rust",
+            "fn unused() {}",
+            "fn unused()",
+            &[],
+            &[],
+        );
         assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.flaws.len(), 1);
@@ -278,9 +339,21 @@ mod tests {
         let provider = MockProvider {
             response: r#"{"flaws": []}"#.into(),
         };
-        let result = flag_flaws(&provider, "test", "clean_fn", "src/lib.rs",
-            1, 1, true, false, "rust", "fn clean_fn() {}", "fn clean_fn()",
-            &[], &[]);
+        let result = flag_flaws(
+            &provider,
+            "test",
+            "clean_fn",
+            "src/lib.rs",
+            1,
+            1,
+            true,
+            false,
+            "rust",
+            "fn clean_fn() {}",
+            "fn clean_fn()",
+            &[],
+            &[],
+        );
         assert!(result.is_ok());
         assert!(result.unwrap().flaws.is_empty());
     }
@@ -288,7 +361,9 @@ mod tests {
     #[test]
     fn answer_parses_referenced_node_ids() {
         let provider = MockProvider {
-            response: r#"{"answer": "It initializes the system.", "referenced_node_ids": ["id1", "id2"]}"#.into(),
+            response:
+                r#"{"answer": "It initializes the system.", "referenced_node_ids": ["id1", "id2"]}"#
+                    .into(),
         };
         let result = answer(&provider, "test", "context here", "What does init do?");
         assert!(result.is_ok());
@@ -300,7 +375,7 @@ mod tests {
     #[test]
     fn parse_json_extracts_from_noisy_output() {
         let result = parse_json::<SummarizeOutput>(
-            r#"Here is the result: {"summary": "hello"} Hope this helps."#
+            r#"Here is the result: {"summary": "hello"} Hope this helps."#,
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap().summary, "hello");

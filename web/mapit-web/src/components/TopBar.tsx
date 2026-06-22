@@ -1,37 +1,110 @@
-
 import { useState } from "react";
 import { useAppState } from "../store";
 import { api } from "../api-client";
 import { SearchBar } from "./SearchBar";
 
+type Toast = { msg: string; ok: boolean };
+
 export function TopBar() {
   const { state, dispatch } = useAppState();
   const [remapping, setRemapping] = useState(false);
   const [annotating, setAnnotating] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
+
+  const showToast = (msg: string, ok: boolean) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleRemap = async () => {
+    setRemapping(true);
+    // Show progress bar immediately (indeterminate until first WS event)
+    dispatch({
+      type: "SET_BG_PROGRESS",
+      progress: {
+        phase: "structural",
+        current: 0,
+        total: 0,
+        label: "Re-mapping codebase…",
+      },
+    });
+    try {
+      await api.remap();
+      showToast("Re-map started", true);
+    } catch (e) {
+      dispatch({ type: "SET_BG_PROGRESS", progress: null });
+      showToast(
+        `Re-map failed: ${e instanceof Error ? e.message : "unknown error"}`,
+        false,
+      );
+    } finally {
+      setRemapping(false);
+    }
+  };
+
+  const handleAnnotate = async () => {
+    setAnnotating(true);
+    // Show progress bar immediately (indeterminate until first WS event)
+    dispatch({
+      type: "SET_BG_PROGRESS",
+      progress: {
+        phase: "ai_enrichment",
+        current: 0,
+        total: state.project?.symbol_count ?? 0,
+        label: "Annotating symbols…",
+      },
+    });
+    try {
+      await api.annotate();
+      showToast("Annotation started — watch the progress bar", true);
+    } catch (e) {
+      dispatch({ type: "SET_BG_PROGRESS", progress: null });
+      showToast(
+        `Annotation failed: ${e instanceof Error ? e.message : "unknown error"}. Check Settings → API Connection.`,
+        false,
+      );
+    } finally {
+      setAnnotating(false);
+    }
+  };
 
   return (
-    <header className="flex items-center justify-between px-4 py-2 bg-mapit-surface border-b border-mapit-border">
+    <header className="flex items-center justify-between px-4 py-2 bg-mapit-surface border-b border-mapit-border relative">
       <div className="flex items-center gap-3">
-        <div className="text-lg font-bold bg-gradient-to-r from-mapit-accent to-mapit-success bg-clip-text text-transparent">
+        <div className="text-lg font-bold bg-gradient-to-r from-mapit-accent to-mapit-success bg-clip-text text-transparent select-none">
           mapit
         </div>
-        <div className="text-xs text-mapit-muted">
-          {state.project?.project_root && (
-            <span>Workspace: {state.project.project_root}</span>
-          )}
-        </div>
+        {state.project?.project_root && (
+          <div
+            className="text-xs text-mapit-muted truncate max-w-xs"
+            title={state.project.project_root}
+          >
+            {state.project.project_root.split("/").slice(-2).join("/")}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
         <SearchBar />
 
+        {/* Ask AI */}
         <button
-          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none"
-          onClick={() => dispatch({ type: "SET_OVERLAY", overlay: { kind: "ask" } })}
+          type="button"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
+            state.overlay?.kind === "ask"
+              ? "bg-mapit-accent text-white border-mapit-accent"
+              : "bg-mapit-surface2 border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50"
+          }`}
+          onClick={() =>
+            dispatch({
+              type: "SET_OVERLAY",
+              overlay: state.overlay?.kind === "ask" ? null : { kind: "ask" },
+            })
+          }
         >
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -39,27 +112,40 @@ export function TopBar() {
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           Ask AI
         </button>
 
+        {/* Flaws */}
         <button
-          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none"
+          type="button"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
+            state.screen === "flaws_report"
+              ? "bg-mapit-accent text-white border-mapit-accent"
+              : "bg-mapit-surface2 border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50"
+          }`}
           onClick={async () => {
+            if (state.screen === "flaws_report") {
+              dispatch({ type: "SET_SCREEN", screen: "system_overview" });
+              return;
+            }
             try {
               const res = await api.flaws();
               dispatch({ type: "SET_FLAWS", flaws: res.flaws });
+              dispatch({ type: "SET_OVERLAY", overlay: null });
               dispatch({ type: "SET_SCREEN", screen: "flaws_report" });
             } catch (e) {
-              console.error(e);
+              showToast(
+                `Could not load flaws: ${e instanceof Error ? e.message : "error"}`,
+                false,
+              );
             }
           }}
         >
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -71,16 +157,38 @@ export function TopBar() {
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          {state.flaws.length > 0 ? `Flaws (${state.flaws.length})` : "Flaws"}
+          {state.flaws.length > 0 ? (
+            <span>
+              Flaws{" "}
+              <span className="bg-mapit-danger text-white text-xs px-1.5 py-0.5 rounded-full ml-0.5">
+                {state.flaws.length}
+              </span>
+            </span>
+          ) : (
+            "Flaws"
+          )}
         </button>
 
+        {/* Settings */}
         <button
-          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none"
-          onClick={() => dispatch({ type: "SET_SCREEN", screen: "settings" })}
+          type="button"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
+            state.screen === "settings"
+              ? "bg-mapit-accent text-white border-mapit-accent"
+              : "bg-mapit-surface2 border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50"
+          }`}
+          onClick={() => {
+            if (state.screen === "settings") {
+              dispatch({ type: "SET_SCREEN", screen: "system_overview" });
+            } else {
+              dispatch({ type: "SET_OVERLAY", overlay: null });
+              dispatch({ type: "SET_SCREEN", screen: "settings" });
+            }
+          }}
         >
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -89,35 +197,25 @@ export function TopBar() {
             strokeLinejoin="round"
           >
             <circle cx="12" cy="12" r="3" />
-            <path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           Settings
         </button>
 
+        {/* Annotate */}
         <button
+          type="button"
           disabled={annotating}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-mapit-accent text-white hover:opacity-90 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={async () => {
-            setAnnotating(true);
-            try {
-              await api.annotate();
-              const project = await api.project();
-              dispatch({ type: "SET_PROJECT", project });
-              const flawsRes = await api.flaws();
-              dispatch({ type: "SET_FLAWS", flaws: flawsRes.flaws });
-            } catch (e) {
-              console.error(e);
-            } finally {
-              setAnnotating(false);
-            }
-          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:bg-mapit-surface hover:border-mapit-accent/50 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleAnnotate}
+          title="Run AI enrichment (summaries + flaw detection)"
         >
           {annotating ? (
-            <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+            <div className="w-3.5 h-3.5 border-2 border-mapit-accent/50 border-t-mapit-accent rounded-full animate-spin" />
           ) : (
             <svg
-              width="16"
-              height="16"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -129,42 +227,23 @@ export function TopBar() {
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
           )}
-          {annotating ? "Annotating..." : "Annotate"}
+          {annotating ? "Annotating…" : "Annotate"}
         </button>
 
+        {/* Re-Map */}
         <button
+          type="button"
           disabled={remapping}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-mapit-success text-white hover:opacity-90 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={async () => {
-            setRemapping(true);
-            try {
-              await api.remap();
-              const [project, nodesRes, edgesRes, featRes, flawRes] = await Promise.all([
-                api.project(),
-                api.nodes(),
-                api.edges(),
-                api.features(),
-                api.flaws(),
-              ]);
-              const nodeMap = new Map(nodesRes.nodes.map((n) => [n.id, n]));
-              dispatch({ type: "SET_PROJECT", project });
-              dispatch({ type: "SET_ALL_NODES", nodes: nodeMap });
-              dispatch({ type: "SET_EDGES", edges: edgesRes.edges });
-              dispatch({ type: "SET_FEATURES", features: featRes.features });
-              dispatch({ type: "SET_FLAWS", flaws: flawRes.flaws });
-            } catch (e) {
-              console.error(e);
-            } finally {
-              setRemapping(false);
-            }
-          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-mapit-accent text-white hover:opacity-90 transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleRemap}
+          title="Re-scan the project and rebuild the graph"
         >
           {remapping ? (
-            <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+            <div className="w-3.5 h-3.5 border-2 border-white/50 border-t-white rounded-full animate-spin" />
           ) : (
             <svg
-              width="16"
-              height="16"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -176,9 +255,22 @@ export function TopBar() {
               <path d="M21 3v5h-5" />
             </svg>
           )}
-          {remapping ? "Remapping..." : "Re-Map"}
+          {remapping ? "Remapping…" : "Re-Map"}
         </button>
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 px-4 py-2 rounded-lg shadow-lg text-sm border max-w-sm text-center pointer-events-none ${
+            toast.ok
+              ? "bg-mapit-success/10 border-mapit-success/40 text-mapit-success"
+              : "bg-mapit-danger/10 border-mapit-danger/40 text-mapit-danger"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
     </header>
   );
 }

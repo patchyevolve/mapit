@@ -67,7 +67,10 @@ export function SearchBar() {
           type: "SET_BREADCRUMB",
           breadcrumb: [{ label: r.node.name, node_id: r.node.id }],
         });
-        dispatch({ type: "SET_SCREEN", screen: "system_overview" });
+        dispatch({
+          type: "SET_SCREEN",
+          screen: r.node.type === "feature" ? "expanded_feature" : "expanded_file",
+        });
         break;
       case "external":
         dispatch({

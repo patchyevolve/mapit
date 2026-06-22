@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -8,21 +7,22 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tracing::{error, warn};
 
 use crate::state::AppState;
-use mapit_core::graph::model::Node;
 use mapit_ai::{
     ollama::OllamaProvider,
     openai_compatible::OpenAiCompatibleProvider,
     provider::AiProvider,
     tasks::{self, SummarizeOutput},
 };
+use mapit_core::graph::model::Node;
 use mapit_core::{
-    config::{load_global_config, load_project_config, GlobalConfig, save_project_config},
+    config::{load_global_config, load_project_config, save_project_config, GlobalConfig},
     graph::{
         builder::{self, FileInput, ParseResult},
-        incremental::{diff_manifest, load_manifest, save_manifest, rebuild_manifest_from_store},
+        incremental::{diff_manifest, load_manifest, rebuild_manifest_from_store, save_manifest},
         model::{self, AiSummaryStatus, FlawBasis, FlawFlag, FlawKind, FlawSeverity},
         store::GraphStore,
     },
@@ -44,10 +44,16 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/graph/features", get(features_handler))
         .route("/api/graph/flaws", get(flaws_handler))
         .route("/api/graph/search", get(search_handler))
-        .route("/api/config", get(get_config_handler).put(put_config_handler))
+        .route(
+            "/api/config",
+            get(get_config_handler).put(put_config_handler),
+        )
+        .route("/api/config/test-connection", post(test_connection_handler))
+        .route("/api/config/test-chat", post(test_chat_handler))
         .route("/api/remap", post(remap_handler))
         .route("/api/annotate", post(annotate_handler))
         .route("/api/ask", post(ask_handler))
+        .route("/api/source", get(source_handler))
 }
 
 #[derive(Deserialize)]
@@ -93,6 +99,18 @@ struct AskBody {
     question: String,
 }
 
+#[derive(Deserialize)]
+struct TestChatBody {
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SourceQuery {
+    file: String,
+    start: Option<u32>,
+    end: Option<u32>,
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -101,7 +119,10 @@ async fn project_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let file_count = store.manifest_entry_count().unwrap_or(0);
     let symbol_count = store.node_count().unwrap_or(0);
@@ -144,12 +165,21 @@ async fn node_handler(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     match store.get_node(&id) {
         Ok(Some(node)) => Ok(Json(serialize_node(&node))),
-        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "node_not_found", "id": id })))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "node_not_found", "id": id })),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )),
     }
 }
 
@@ -159,7 +189,10 @@ async fn neighbors_handler(
     Query(q): Query<NeighborsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let direction = q.direction.as_deref().unwrap_or("both");
     let depth = q.depth.unwrap_or(1).min(10);
@@ -220,11 +253,25 @@ async fn trace_handler(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let _ = &_q;
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
-    let node = store.get_node(&id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(json!({ "error": "node_not_found", "id": id }))))?;
+    let node = store
+        .get_node(&id)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "node_not_found", "id": id })),
+            )
+        })?;
 
     // Check if node has CFG data
     let cfgs = if let Node::Function(f) = &node {
@@ -245,14 +292,19 @@ async fn trace_handler(
             for block_id in &path.blocks {
                 let block = block_idx.get(block_id).and_then(|i| cfg.blocks.get(*i));
                 // Resolve edge_ids to full node objects for the frontend
-                let calls: Vec<Value> = block.map(|b| {
-                    b.calls_in_block.iter().filter_map(|c| {
-                        let edge = store.get_edge(&c.edge_id).ok().flatten()?;
-                        store.get_node(&edge.to_id).ok().flatten().map(|n| {
+                let calls: Vec<Value> = block
+                    .map(|b| {
+                        b.calls_in_block
+                            .iter()
+                            .filter_map(|c| {
+                                let edge = store.get_edge(&c.edge_id).ok().flatten()?;
+                                store.get_node(&edge.to_id).ok().flatten().map(|n| {
                             json!({ "node": serialize_node(&n), "order_hint": c.order_hint })
                         })
-                    }).collect()
-                }).unwrap_or_default();
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 steps.push(json!({
                     "block_id": block_id,
                     "label": &path.label,
@@ -285,7 +337,10 @@ async fn nodes_handler(
     let store = state.store.lock().unwrap();
     let filter_type = params.get("type").map(|s| s.as_str());
     let all = store.get_all_nodes().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let nodes: Vec<Value> = all
         .into_iter()
@@ -300,7 +355,10 @@ async fn edges_handler(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().unwrap();
     let all = store.get_all_edges().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let edges: Vec<Value> = all.iter().map(|e| json!(e)).collect();
     Ok(Json(json!({ "edges": edges })))
@@ -310,16 +368,22 @@ async fn features_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let all_nodes = store.get_all_nodes().unwrap_or_default();
-    let features: Vec<Value> = all_nodes.iter().filter_map(|n| {
-        if matches!(n, Node::Feature(_)) {
-            Some(serialize_node(n))
-        } else {
-            None
-        }
-    }).collect();
+    let features: Vec<Value> = all_nodes
+        .iter()
+        .filter_map(|n| {
+            if matches!(n, Node::Feature(_)) {
+                Some(serialize_node(n))
+            } else {
+                None
+            }
+        })
+        .collect();
     Ok(Json(json!({ "features": features })))
 }
 
@@ -328,22 +392,28 @@ async fn flaws_handler(
     Query(q): Query<FlawsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let flaws = store.query_flaws(q.severity.as_deref()).unwrap_or_default();
-    let items: Vec<Value> = flaws.iter().map(|(flaw, name, file_path, primary_node_id)| {
-        json!({
-            "id": flaw.id,
-            "kind": flaw.kind,
-            "severity": flaw.severity,
-            "description": flaw.description,
-            "confidence": flaw.confidence,
-            "basis": flaw.basis,
-            "primary_node_id": primary_node_id,
-            "primary_node_name": name,
-            "file_path": file_path,
+    let items: Vec<Value> = flaws
+        .iter()
+        .map(|(flaw, name, file_path, primary_node_id)| {
+            json!({
+                "id": flaw.id,
+                "kind": flaw.kind,
+                "severity": flaw.severity,
+                "description": flaw.description,
+                "confidence": flaw.confidence,
+                "basis": flaw.basis,
+                "primary_node_id": primary_node_id,
+                "primary_node_name": name,
+                "file_path": file_path,
+            })
         })
-    }).collect();
+        .collect();
     Ok(Json(json!({ "flaws": items })))
 }
 
@@ -352,16 +422,23 @@ async fn search_handler(
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
     let limit = q.limit.unwrap_or(50).min(200) as usize;
     let results = store.search_nodes_by_name(&q.q).unwrap_or_default();
-    let items: Vec<Value> = results.iter().take(limit).map(|node| {
-        json!({
-            "node": serialize_node(node),
-            "match_reason": "name"
+    let items: Vec<Value> = results
+        .iter()
+        .take(limit)
+        .map(|node| {
+            json!({
+                "node": serialize_node(node),
+                "match_reason": "name"
+            })
         })
-    }).collect();
+        .collect();
     Ok(Json(json!({ "results": items })))
 }
 
@@ -369,10 +446,8 @@ async fn get_config_handler(
     State(_state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config_dir = mapit_core::config::global_config_dir();
-    let global = mapit_core::config::load_global_config(&config_dir)
-        .unwrap_or_default();
-    let creds = mapit_core::config::load_credentials(&config_dir)
-        .unwrap_or_default();
+    let global = mapit_core::config::load_global_config(&config_dir).unwrap_or_default();
+    let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
     let api_key_set = creds.providers.contains_key("openai-compatible");
     Ok(Json(json!({
         "provider": global.default_provider,
@@ -388,13 +463,14 @@ async fn put_config_handler(
     Json(body): Json<PutConfigBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let config_dir = mapit_core::config::global_config_dir();
-    let mut global = mapit_core::config::load_global_config(&config_dir)
-        .unwrap_or_default();
+    let mut global = mapit_core::config::load_global_config(&config_dir).unwrap_or_default();
     if let Some(ref p) = body.provider {
         if p != "ollama" && p != "openai-compatible" {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Unknown provider '{p}'. Use 'ollama' or 'openai-compatible'.") })),
+                Json(
+                    json!({ "error": format!("Unknown provider '{p}'. Use 'ollama' or 'openai-compatible'.") }),
+                ),
             ));
         }
         global.default_provider = p.clone();
@@ -408,14 +484,23 @@ async fn put_config_handler(
     if let Some(patterns) = body.extra_ignore_patterns {
         global.default_ignore_patterns = patterns;
     }
-    mapit_core::config::save_global_config(&config_dir, &global)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
+    mapit_core::config::save_global_config(&config_dir, &global).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+    })?;
 
     if let Some(key) = body.api_key {
-        let url = body.base_url.clone().unwrap_or_else(|| global.ollama_base_url.clone());
-        let model = body.model.clone().unwrap_or_else(|| global.default_model.clone());
-        let mut creds = mapit_core::config::load_credentials(&config_dir)
-            .unwrap_or_default();
+        let url = body
+            .base_url
+            .clone()
+            .unwrap_or_else(|| global.ollama_base_url.clone());
+        let model = body
+            .model
+            .clone()
+            .unwrap_or_else(|| global.default_model.clone());
+        let mut creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
         creds.providers.insert(
             "openai-compatible".into(),
             mapit_core::config::ProviderCredential {
@@ -424,8 +509,12 @@ async fn put_config_handler(
                 model,
             },
         );
-        mapit_core::config::save_credentials(&config_dir, &creds)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
+        mapit_core::config::save_credentials(&config_dir, &creds).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+        })?;
     }
 
     Ok(Json(json!({
@@ -440,19 +529,26 @@ async fn remap_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RemapBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let mode = if body.force.unwrap_or(false) { "full" } else { "incremental" };
+    let mode = if body.force.unwrap_or(false) {
+        "full"
+    } else {
+        "incremental"
+    };
     let force = body.force.unwrap_or(false);
     let target = state.project_root.clone();
     let mapit_dir = target.join(".mapit");
     let db_path = mapit_dir.join("graph.sqlite");
     let ws_tx = state.ws_tx.clone();
 
-    let _ = ws_tx.send(json!({
-        "event": "map_progress",
-        "phase": "structural",
-        "current": 0,
-        "total": 0,
-    }).to_string());
+    let _ = ws_tx.send(
+        json!({
+            "event": "map_progress",
+            "phase": "structural",
+            "current": 0,
+            "total": 0,
+        })
+        .to_string(),
+    );
 
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&mapit_dir)?;
@@ -672,10 +768,11 @@ async fn annotate_handler(
     let db_path = mapit_dir.join("graph.sqlite");
     let ws_tx = state.ws_tx.clone();
 
-    tokio::task::spawn_blocking(move || {
+    let handle = tokio::task::spawn_blocking(move || {
         let store = GraphStore::open(&db_path)?;
 
-        let global_cfg = load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
+        let global_cfg =
+            load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
         let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
         let provider = create_provider(&global_cfg, &project_cfg)?;
         let model = project_cfg
@@ -683,7 +780,8 @@ async fn annotate_handler(
             .as_deref()
             .unwrap_or(&global_cfg.default_model);
 
-        let all_nodes = store.search_nodes_by_name("")?;
+        // Use get_all_nodes (LIMIT 10000) not search_nodes_by_name (LIMIT 50)
+        let all_nodes = store.get_all_nodes()?;
         let function_nodes: Vec<Node> = all_nodes
             .into_iter()
             .filter(|n| matches!(n, Node::Function(_)))
@@ -692,19 +790,22 @@ async fn annotate_handler(
                     return true;
                 }
                 match &n.base().ai_summary_status {
-                    AiSummaryStatus::Pending => true,
-                    AiSummaryStatus::Ready => all,
-                    AiSummaryStatus::Unavailable => all,
+                    AiSummaryStatus::Pending => true,     // always annotate pending
+                    AiSummaryStatus::Ready => all,        // only re-annotate ready if --all
+                    AiSummaryStatus::Unavailable => true, // retry unavailable ones (provider may now work)
                 }
             })
             .collect();
 
-        let _ = ws_tx.send(json!({
-            "event": "map_progress",
-            "phase": "ai_enrichment",
-            "current": 0,
-            "total": function_nodes.len(),
-        }).to_string());
+        let _ = ws_tx.send(
+            json!({
+                "event": "map_progress",
+                "phase": "ai_enrichment",
+                "current": 0,
+                "total": function_nodes.len(),
+            })
+            .to_string(),
+        );
 
         for (i, node) in function_nodes.iter().enumerate() {
             let base = node.base();
@@ -717,7 +818,12 @@ async fn annotate_handler(
             let start_line = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
             let end_line = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
             let language = base.language.as_deref().unwrap_or("");
-            let source_text = read_source_snippet(&target, base.file_path.as_deref().unwrap_or(""), start_line, end_line);
+            let source_text = read_source_snippet(
+                &target,
+                base.file_path.as_deref().unwrap_or(""),
+                start_line,
+                end_line,
+            );
             let node_type = format!("{:?}", base.node_type);
 
             // Summarize
@@ -753,8 +859,14 @@ async fn annotate_handler(
             }
 
             // Flaw flagging
-            let has_incoming = match node { Node::Function(f) => f.has_incoming_calls, _ => false };
-            let is_entry = match node { Node::Function(f) => f.is_entry_point_candidate, _ => false };
+            let has_incoming = match node {
+                Node::Function(f) => f.has_incoming_calls,
+                _ => false,
+            };
+            let is_entry = match node {
+                Node::Function(f) => f.is_entry_point_candidate,
+                _ => false,
+            };
             match tasks::flag_flaws(
                 provider.as_ref(),
                 model,
@@ -809,23 +921,37 @@ async fn annotate_handler(
                 }
             }
 
-            let _ = ws_tx.send(json!({
-                "event": "map_progress",
-                "phase": "ai_enrichment",
-                "current": i + 1,
-                "total": function_nodes.len(),
-                "current_file": base.file_path,
-            }).to_string());
+            let _ = ws_tx.send(
+                json!({
+                    "event": "map_progress",
+                    "phase": "ai_enrichment",
+                    "current": i + 1,
+                    "total": function_nodes.len(),
+                    "current_file": base.file_path,
+                })
+                .to_string(),
+            );
         }
 
-        let _ = ws_tx.send(json!({
-            "event": "map_phase_complete",
-            "phase": "ai_enrichment",
-        }).to_string());
+        let _ = ws_tx.send(
+            json!({
+                "event": "map_phase_complete",
+                "phase": "ai_enrichment",
+            })
+            .to_string(),
+        );
 
         anyhow::Ok(function_nodes.len())
-    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Join error: {e}") }))))?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Annotate error: {e}") }))))?;
+    });
+    // Fire-and-forget — return 202 immediately; progress arrives via WebSocket.
+    // Errors in the background task are logged, not surfaced as HTTP errors.
+    tokio::spawn(async move {
+        match handle.await {
+            Ok(Ok(n)) => tracing::info!("Annotation complete: {n} functions processed"),
+            Ok(Err(e)) => error!("Annotation task error: {e:#}"),
+            Err(e) => error!("Annotation join error: {e}"),
+        }
+    });
 
     Ok(Json(json!({
         "status": "started",
@@ -837,18 +963,31 @@ async fn ask_handler(
     Json(body): Json<AskBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let store = state.store.lock().map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
     })?;
 
     // Simple search-based answer: find nodes matching the question
-    let results = store.search_nodes_by_name(&body.question).unwrap_or_default();
+    let results = store
+        .search_nodes_by_name(&body.question)
+        .unwrap_or_default();
     let referenced: Vec<String> = results.iter().map(|n| n.id().to_string()).collect();
 
     let answer = if referenced.is_empty() {
         "No relevant context found in the codebase.".to_string()
     } else {
-        let names: Vec<&str> = results.iter().map(|n| n.base().name.as_str()).take(5).collect();
-        format!("Found {} related symbols: {}", referenced.len(), names.join(", "))
+        let names: Vec<&str> = results
+            .iter()
+            .map(|n| n.base().name.as_str())
+            .take(5)
+            .collect();
+        format!(
+            "Found {} related symbols: {}",
+            referenced.len(),
+            names.join(", ")
+        )
     };
 
     let grounding = if referenced.is_empty() {
@@ -862,6 +1001,195 @@ async fn ask_handler(
         "referenced_node_ids": referenced,
         "grounding_status": grounding,
     })))
+}
+
+async fn source_handler(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<SourceQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Reject absolute paths and path traversal
+    let file_path = q.file.trim_start_matches('/');
+    if file_path.contains("..") || file_path.starts_with('/') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "invalid_path" })),
+        ));
+    }
+    let abs_path = state.project_root.join(file_path);
+    // Security: ensure path is inside project root after canonicalization
+    let canonical_project =
+        std::fs::canonicalize(&state.project_root).unwrap_or_else(|_| state.project_root.clone());
+    let canonical_file = std::fs::canonicalize(&abs_path).unwrap_or_else(|_| abs_path.clone());
+    if !canonical_file.starts_with(&canonical_project) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "invalid_path" })),
+        ));
+    }
+    let content = std::fs::read_to_string(&abs_path).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": e.to_string() })),
+        )
+    })?;
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    let start_idx = q
+        .start
+        .map(|s| (s as usize).saturating_sub(1))
+        .unwrap_or(0)
+        .min(total);
+    let end_idx = q.end.map(|e| (e as usize).min(total)).unwrap_or(total);
+    let slice = &lines[start_idx..end_idx];
+    let language = abs_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(Json(json!({
+        "content": slice.join("\n"),
+        "language": language,
+        "start_line": start_idx + 1,
+        "end_line": end_idx,
+    })))
+}
+
+async fn test_connection_handler(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config_dir = mapit_core::config::global_config_dir();
+    let global = mapit_core::config::load_global_config(&config_dir).unwrap_or_default();
+    let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
+
+    let provider_id = global.default_provider.clone();
+    let base_url = global.ollama_base_url.clone();
+    let model = global.default_model.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let provider: Box<dyn mapit_ai::provider::AiProvider> =
+            if provider_id == "openai-compatible" {
+                let cred = creds
+                    .providers
+                    .get("openai-compatible")
+                    .cloned()
+                    .unwrap_or_else(|| mapit_core::config::ProviderCredential {
+                        base_url: base_url,
+                        api_key: String::new(),
+                        model: model,
+                    });
+                Box::new(mapit_ai::openai_compatible::OpenAiCompatibleProvider {
+                    base_url: cred.base_url,
+                    api_key: cred.api_key,
+                    model: cred.model,
+                })
+            } else {
+                Box::new(mapit_ai::ollama::OllamaProvider { base_url })
+            };
+        match provider.list_models() {
+            Ok(models) => {
+                let latency = start.elapsed().as_millis() as u64;
+                let names: Vec<String> = models.into_iter().map(|m| m.id).collect();
+                let count = names.len();
+                Ok((latency, names, count))
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+    })?;
+
+    match result {
+        Ok((latency_ms, models, count)) => Ok(Json(json!({
+            "ok": true,
+            "message": format!("Connected \u{00b7} {} model{} available", count, if count == 1 { "" } else { "s" }),
+            "latency_ms": latency_ms,
+            "models": models,
+        }))),
+        Err(err) => Ok(Json(json!({
+            "ok": false,
+            "message": err,
+            "latency_ms": null,
+            "models": [],
+        }))),
+    }
+}
+
+async fn test_chat_handler(
+    State(_state): State<Arc<AppState>>,
+    Json(body): Json<TestChatBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let config_dir = mapit_core::config::global_config_dir();
+    let global = mapit_core::config::load_global_config(&config_dir).unwrap_or_default();
+    let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
+
+    let provider_id = global.default_provider.clone();
+    let base_url = global.ollama_base_url.clone();
+    let model = global.default_model.clone();
+    let message = body
+        .message
+        .unwrap_or_else(|| "Respond with exactly one word: OK".to_string());
+
+    let result = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let provider: Box<dyn mapit_ai::provider::AiProvider> =
+            if provider_id == "openai-compatible" {
+                let cred = creds
+                    .providers
+                    .get("openai-compatible")
+                    .cloned()
+                    .unwrap_or_else(|| mapit_core::config::ProviderCredential {
+                        base_url: base_url,
+                        api_key: String::new(),
+                        model: model.clone(),
+                    });
+                Box::new(mapit_ai::openai_compatible::OpenAiCompatibleProvider {
+                    base_url: cred.base_url,
+                    api_key: cred.api_key,
+                    model: model,
+                })
+            } else {
+                Box::new(mapit_ai::ollama::OllamaProvider { base_url })
+            };
+        let request = mapit_ai::provider::AiRequest {
+            model: String::new(), // empty → provider uses its own stored model name
+            system_prompt: None,
+            user_prompt: message,
+            expect_json: false,
+        };
+        match provider.complete(request) {
+            Ok(resp) => {
+                let latency = start.elapsed().as_millis() as u64;
+                Ok((latency, resp.content))
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+    })?;
+
+    match result {
+        Ok((latency_ms, response)) => Ok(Json(json!({
+            "ok": true,
+            "response": response,
+            "latency_ms": latency_ms,
+        }))),
+        Err(err) => Ok(Json(json!({
+            "ok": false,
+            "error": err,
+            "latency_ms": null,
+        }))),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -902,7 +1230,10 @@ fn serialize_node(node: &Node) -> Value {
             if let Some(obj) = fields.as_object_mut() {
                 obj.insert("signature".into(), json!(f.signature));
                 obj.insert("has_incoming_calls".into(), json!(f.has_incoming_calls));
-                obj.insert("is_entry_point_candidate".into(), json!(f.is_entry_point_candidate));
+                obj.insert(
+                    "is_entry_point_candidate".into(),
+                    json!(f.is_entry_point_candidate),
+                );
             }
         }
         Node::File(f) => {
@@ -917,7 +1248,10 @@ fn serialize_node(node: &Node) -> Value {
         Node::Feature(f) => {
             if let Some(obj) = fields.as_object_mut() {
                 obj.insert("member_node_ids".into(), json!(f.member_node_ids));
-                obj.insert("classification_confidence".into(), json!(f.classification_confidence));
+                obj.insert(
+                    "classification_confidence".into(),
+                    json!(f.classification_confidence),
+                );
             }
         }
         Node::External(e) => {
@@ -933,19 +1267,34 @@ fn serialize_node(node: &Node) -> Value {
 fn ensure_gitignore(project_root: &std::path::Path) -> anyhow::Result<()> {
     let mapit_gitignore = project_root.join(".mapit").join(".gitignore");
     if !mapit_gitignore.exists() {
-        std::fs::write(&mapit_gitignore, "# mapit metadata directory — all contents auto-generated\n*\n")?;
+        std::fs::write(
+            &mapit_gitignore,
+            "# mapit metadata directory — all contents auto-generated\n*\n",
+        )?;
     }
     Ok(())
 }
 
-fn create_provider(global: &GlobalConfig, project: &mapit_core::config::ProjectConfig) -> anyhow::Result<Box<dyn AiProvider>> {
-    let provider_name = project.provider_override.as_deref().unwrap_or(&global.default_provider);
+fn create_provider(
+    global: &GlobalConfig,
+    project: &mapit_core::config::ProjectConfig,
+) -> anyhow::Result<Box<dyn AiProvider>> {
+    let provider_name = project
+        .provider_override
+        .as_deref()
+        .unwrap_or(&global.default_provider);
     match provider_name {
-        "ollama" => Ok(Box::new(OllamaProvider { base_url: global.ollama_base_url.clone() })),
+        "ollama" => Ok(Box::new(OllamaProvider {
+            base_url: global.ollama_base_url.clone(),
+        })),
         "openai-compatible" => {
             let config_dir = mapit_core::config::global_config_dir();
             let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
-            let api_key = creds.providers.get("openai-compatible").map(|c| c.api_key.clone()).unwrap_or_default();
+            let api_key = creds
+                .providers
+                .get("openai-compatible")
+                .map(|c| c.api_key.clone())
+                .unwrap_or_default();
             Ok(Box::new(OpenAiCompatibleProvider {
                 base_url: global.ollama_base_url.clone(),
                 api_key,
@@ -980,7 +1329,12 @@ fn get_callee_names(store: &GraphStore, node_id: &str) -> Vec<String> {
     }
 }
 
-fn read_source_snippet(project_root: &std::path::Path, file_path: &str, start_line: u32, end_line: u32) -> String {
+fn read_source_snippet(
+    project_root: &std::path::Path,
+    file_path: &str,
+    start_line: u32,
+    end_line: u32,
+) -> String {
     if file_path.is_empty() || start_line == 0 || end_line == 0 {
         return String::new();
     }

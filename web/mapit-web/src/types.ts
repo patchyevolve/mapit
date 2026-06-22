@@ -271,7 +271,11 @@ export interface WsError {
   detail?: string;
 }
 
-export type WsEvent = WsMapProgress | WsMapPhaseComplete | WsNodeUpdated | WsError;
+export type WsEvent =
+  | WsMapProgress
+  | WsMapPhaseComplete
+  | WsNodeUpdated
+  | WsError;
 
 /* ──────────────────────────────────────────────
    App state machine (App Flow §5)
@@ -291,8 +295,18 @@ export type Overlay =
   | { kind: "trace_view"; node_id: string }
   | { kind: "neighbors"; node_id: string }
   | { kind: "external_detail"; node_id: string }
+  | { kind: "simulation"; node_id: string }
   | { kind: "ask" }
   | null;
+
+export interface ProgressState {
+  phase: "structural" | "ai_enrichment";
+  current: number;
+  total: number;
+  currentFile?: string;
+  /** Human label shown in the progress bar */
+  label: string;
+}
 
 export interface AppState {
   screen: AppScreen;
@@ -305,5 +319,13 @@ export interface AppState {
   flaws: FlawEntry[];
   searchResults: SearchResult[];
   wsConnected: boolean;
-  mapProgress: { phase: string; current: number; total: number; currentFile?: string } | null;
+  /** Full-screen progress — only used during the very first map (screen = map_progress) */
+  mapProgress: {
+    phase: string;
+    current: number;
+    total: number;
+    currentFile?: string;
+  } | null;
+  /** Background progress overlay — used when remap/annotate runs while the graph is visible */
+  bgProgress: ProgressState | null;
 }
