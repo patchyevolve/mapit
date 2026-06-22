@@ -7,16 +7,40 @@ pub async fn run(target: &Path) -> Result<()> {
     let db_path = mapit_dir.join("graph.sqlite");
     let is_first_run = !db_path.exists();
 
-    // Check if global config exists; suggest init if not
     let config_dir = config::global_config_dir();
     let global_config_path = config_dir.join("global_config.json");
-    if !global_config_path.exists() {
-        println!("No AI provider configured. Run `mapit init` to set one up,");
-        println!("or proceed with structural mapping only (no AI enrichment).");
-        println!();
+
+    // Per App-Flow §1: on first run, trigger first-time setup
+    if is_first_run || !global_config_path.exists() {
+        if !global_config_path.exists() {
+            println!("First run detected — let's set up your AI provider first.");
+            println!("(You can skip AI setup and just use structural mapping.)");
+            println!();
+            super::init::run(target).await?;
+        }
     }
 
     super::map::run(target, false).await?;
+
+    // Save to projects list
+    if let Ok(abs) = target.canonicalize() {
+        let projects_path = config_dir.join("projects.json");
+        let mut projects: Vec<String> = if projects_path.exists() {
+            std::fs::read_to_string(&projects_path)
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let path_str = abs.to_string_lossy().to_string();
+        if !projects.contains(&path_str) {
+            projects.push(path_str);
+            if let Ok(text) = serde_json::to_string_pretty(&projects) {
+                let _ = std::fs::write(&projects_path, text);
+            }
+        }
+    }
 
     if is_first_run {
         println!("✓ First map complete.");

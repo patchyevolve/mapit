@@ -35,10 +35,10 @@ async fn inner(target: &Path, question: &str) -> Result<String> {
 
     // Search for relevant nodes
     let results = store.search_nodes_by_name(question).unwrap_or_default();
-    let context_nodes: Vec<String> = results.iter().take(5).map(|n| n.base().name.clone()).collect();
+    let context: String = results.iter().take(5).map(|n| n.base().name.clone()).collect::<Vec<_>>().join(", ");
 
-    let result = tasks::answer(&*provider, model, question, &context_nodes)
-        .map_err(|e| format!("AI call failed: {e}"))?;
+    let result = tasks::answer(&*provider, model, &context, question)
+        .map_err(|e| anyhow::anyhow!("AI call failed: {e}"))?;
 
     Ok(result.answer)
 }
