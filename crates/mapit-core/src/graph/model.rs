@@ -367,6 +367,18 @@ pub fn compute_edge_id(
     hex::encode(&hash[..16])
 }
 
+/// Dead-code gating rule (03-graph-data-model.md §3):
+/// `dead_code` flaws must never be generated from AI judgment alone.
+/// They must be gated on `has_incoming_calls == false` AND
+/// `is_entry_point_candidate == false` first (structural facts),
+/// with AI only assessing plausibility on top.
+pub fn is_dead_code_candidate(node: &Node) -> bool {
+    match node {
+        Node::Function(f) => !f.has_incoming_calls && !f.is_entry_point_candidate,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,5 +401,70 @@ mod tests {
     fn structural_hash_length() {
         let h = compute_structural_hash("fn main() {}");
         assert_eq!(h.len(), 32);
+    }
+
+    #[test]
+    fn dead_code_candidate_true_when_no_callers_and_not_entry() {
+        let node = Node::Function(FunctionNode {
+            base: BaseNode {
+                id: "t".into(), name: "unused_helper".into(), node_type: NodeType::Function,
+                language: None, file_path: None, span: None,
+                ai_summary: None, ai_summary_status: AiSummaryStatus::Pending,
+                ai_model_used: None, structural_hash: "h".into(), flaws: vec![],
+            },
+            signature: "fn unused_helper()".into(),
+            is_entry_point_candidate: false,
+            has_incoming_calls: false,
+            control_flow: None,
+        });
+        assert!(is_dead_code_candidate(&node));
+    }
+
+    #[test]
+    fn dead_code_candidate_false_when_has_callers() {
+        let node = Node::Function(FunctionNode {
+            base: BaseNode {
+                id: "t".into(), name: "used_fn".into(), node_type: NodeType::Function,
+                language: None, file_path: None, span: None,
+                ai_summary: None, ai_summary_status: AiSummaryStatus::Pending,
+                ai_model_used: None, structural_hash: "h".into(), flaws: vec![],
+            },
+            signature: "fn used_fn()".into(),
+            is_entry_point_candidate: false,
+            has_incoming_calls: true,
+            control_flow: None,
+        });
+        assert!(!is_dead_code_candidate(&node));
+    }
+
+    #[test]
+    fn dead_code_candidate_false_when_entry_point() {
+        let node = Node::Function(FunctionNode {
+            base: BaseNode {
+                id: "t".into(), name: "main".into(), node_type: NodeType::Function,
+                language: None, file_path: None, span: None,
+                ai_summary: None, ai_summary_status: AiSummaryStatus::Pending,
+                ai_model_used: None, structural_hash: "h".into(), flaws: vec![],
+            },
+            signature: "fn main()".into(),
+            is_entry_point_candidate: true,
+            has_incoming_calls: false,
+            control_flow: None,
+        });
+        assert!(!is_dead_code_candidate(&node));
+    }
+
+    #[test]
+    fn dead_code_candidate_false_for_non_function() {
+        let node = Node::File(FileNode {
+            base: BaseNode {
+                id: "f".into(), name: "file.rs".into(), node_type: NodeType::File,
+                language: Some("rust".into()), file_path: Some("src/file.rs".into()), span: None,
+                ai_summary: None, ai_summary_status: AiSummaryStatus::Pending,
+                ai_model_used: None, structural_hash: "h".into(), flaws: vec![],
+            },
+            size_bytes: 100, parse_status: ParseStatus::Ok, parse_error: None,
+        });
+        assert!(!is_dead_code_candidate(&node));
     }
 }

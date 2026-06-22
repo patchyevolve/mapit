@@ -1,0 +1,13 @@
+You have access to a codebase graph. Answer the user's question using ONLY the context provided below. If the context doesn't contain enough information to fully answer, say so.
+
+Context:
+{{context}}
+
+Question:
+{{question}}
+
+Respond with a JSON object:
+{
+  "answer": "your grounded answer here",
+  "referenced_node_ids": ["id1", "id2"]
+}

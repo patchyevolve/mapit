@@ -41,3 +41,5 @@ reqwest = { version = "0.12.19", features = ["json", "rustls-tls"], default-feat
 
 # graph algorithms
 petgraph = { version = "0.8.1" }
+
+

@@ -401,6 +401,203 @@ impl GraphStore {
         Ok(result)
     }
 
+    // -----------------------------------------------------------------------
+    // Query helpers
+    // -----------------------------------------------------------------------
+
+    /// Search nodes by name substring match.
+    pub fn search_nodes_by_name(&self, query: &str) -> Result<Vec<Node>> {
+        let pattern = format!("%{}%", query);
+        let mut stmt = self.conn.prepare(
+            "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
+             FROM nodes WHERE name LIKE ?1
+             ORDER BY name LIMIT 50",
+        )?;
+        let mut rows = stmt.query(params![pattern])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let mut node: Node =
+                serde_json::from_str(&json).context("deserialize search result")?;
+            node.fix_node_type();
+            if let Node::Function(f) = &mut node {
+                if let Some(v) = row.get::<_, Option<i32>>(1)? {
+                    f.has_incoming_calls = v != 0;
+                }
+                if let Some(v) = row.get::<_, Option<i32>>(2)? {
+                    f.is_entry_point_candidate = v != 0;
+                }
+            }
+            results.push(node);
+        }
+        Ok(results)
+    }
+
+    /// Count of function nodes.
+    pub fn function_count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM nodes WHERE type = 'function'",
+                [],
+                |row| row.get(0),
+            )?;
+        Ok(count as u64)
+    }
+
+    /// Return all flaws, optionally filtered by severity.
+    /// Each result contains the FlawFlag + the primary node's name and file_path.
+    pub fn query_flaws(
+        &self,
+        severity_filter: Option<&str>,
+    ) -> Result<Vec<(FlawFlag, /* node_name */ String, /* file_path */ Option<String>)>> {
+        let sql = match severity_filter {
+            Some(_) => {
+                "SELECT f.id, f.kind, f.severity, f.description, f.confidence, f.basis,
+                        f.primary_node_id, f.related_node_ids_json,
+                        n.name, n.file_path
+                 FROM flaws f JOIN nodes n ON f.primary_node_id = n.id
+                 WHERE f.severity = ?1
+                 ORDER BY f.severity, f.id"
+            }
+            None => {
+                "SELECT f.id, f.kind, f.severity, f.description, f.confidence, f.basis,
+                        f.primary_node_id, f.related_node_ids_json,
+                        n.name, n.file_path
+                 FROM flaws f JOIN nodes n ON f.primary_node_id = n.id
+                 ORDER BY f.severity, f.id"
+            }
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+        let mut rows = if let Some(sev) = severity_filter {
+            stmt.query(params![sev])?
+        } else {
+            stmt.query([])?
+        };
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let severity: String = row.get(2)?;
+            let description: String = row.get(3)?;
+            let confidence: f64 = row.get(4)?;
+            let basis: String = row.get(5)?;
+            let related_json: Option<String> = row.get(7)?;
+            let node_name: String = row.get(8)?;
+            let file_path: Option<String> = row.get(9)?;
+
+            let flaw_kind = match kind.as_str() {
+                "dead_code" => super::model::FlawKind::DeadCode,
+                "circular_dependency" => super::model::FlawKind::CircularDependency,
+                "structural_smell" => super::model::FlawKind::StructuralSmell,
+                "suspected_bug" => super::model::FlawKind::SuspectedBug,
+                "missing_error_handling" => super::model::FlawKind::MissingErrorHandling,
+                "resource_leak_pattern" => super::model::FlawKind::ResourceLeakPattern,
+                _ => super::model::FlawKind::StructuralSmell,
+            };
+            let flaw_severity = match severity.as_str() {
+                "info" => super::model::FlawSeverity::Info,
+                "warning" => super::model::FlawSeverity::Warning,
+                "high" => super::model::FlawSeverity::High,
+                _ => super::model::FlawSeverity::Warning,
+            };
+            let flaw_basis = match basis.as_str() {
+                "structural" => super::model::FlawBasis::Structural,
+                "ai" => super::model::FlawBasis::Ai,
+                "structural+ai" => super::model::FlawBasis::StructuralPlusAi,
+                _ => super::model::FlawBasis::Structural,
+            };
+            let related = related_json
+                .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok());
+
+            results.push((
+                FlawFlag {
+                    id,
+                    kind: flaw_kind,
+                    severity: flaw_severity,
+                    description,
+                    confidence,
+                    basis: flaw_basis,
+                    related_node_ids: related,
+                },
+                node_name,
+                file_path,
+            ));
+        }
+        Ok(results)
+    }
+
+    /// Return flaws for a specific node.
+    pub fn get_flaws_for_node(&self, node_id: &str) -> Result<Vec<FlawFlag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, severity, description, confidence, basis, primary_node_id, related_node_ids_json
+             FROM flaws WHERE primary_node_id = ?1 ORDER BY severity",
+        )?;
+        let mut rows = stmt.query(params![node_id])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let severity: String = row.get(2)?;
+            let description: String = row.get(3)?;
+            let confidence: f64 = row.get(4)?;
+            let basis: String = row.get(5)?;
+            let related_json: Option<String> = row.get(7)?;
+
+            let flaw_kind = match kind.as_str() {
+                "dead_code" => super::model::FlawKind::DeadCode,
+                "circular_dependency" => super::model::FlawKind::CircularDependency,
+                "structural_smell" => super::model::FlawKind::StructuralSmell,
+                "suspected_bug" => super::model::FlawKind::SuspectedBug,
+                "missing_error_handling" => super::model::FlawKind::MissingErrorHandling,
+                "resource_leak_pattern" => super::model::FlawKind::ResourceLeakPattern,
+                _ => super::model::FlawKind::StructuralSmell,
+            };
+            let flaw_severity = match severity.as_str() {
+                "info" => super::model::FlawSeverity::Info,
+                "warning" => super::model::FlawSeverity::Warning,
+                "high" => super::model::FlawSeverity::High,
+                _ => super::model::FlawSeverity::Warning,
+            };
+            let flaw_basis = match basis.as_str() {
+                "structural" => super::model::FlawBasis::Structural,
+                "ai" => super::model::FlawBasis::Ai,
+                "structural+ai" => super::model::FlawBasis::StructuralPlusAi,
+                _ => super::model::FlawBasis::Structural,
+            };
+            let related = related_json
+                .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok());
+
+            results.push(FlawFlag {
+                id,
+                kind: flaw_kind,
+                severity: flaw_severity,
+                description,
+                confidence,
+                basis: flaw_basis,
+                related_node_ids: related,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Count of flaws, optionally by severity.
+    pub fn flaw_count(&self, severity: Option<&str>) -> Result<u64> {
+        let sql = match severity {
+            Some(_) => "SELECT COUNT(*) FROM flaws WHERE severity = ?1",
+            None => "SELECT COUNT(*) FROM flaws",
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let count: i64 = if let Some(sev) = severity {
+            stmt.query_row(params![sev], |row| row.get(0))?
+        } else {
+            stmt.query_row([], |row| row.get(0))?
+        };
+        Ok(count as u64)
+    }
+
     /// Update has_incoming_calls for all function nodes based on edge data.
     /// Called after a full graph build to set this structural fact correctly.
     pub fn recompute_incoming_calls(&self) -> Result<()> {

@@ -22,3 +22,5 @@ chrono = { workspace = true }
 mapit-core = { path = "../mapit-core" }
 mapit-ai = { path = "../mapit-ai" }
 mapit-server = { path = "../mapit-server" }
+indicatif = "0.17.11"
+rpassword = "7.3.1"

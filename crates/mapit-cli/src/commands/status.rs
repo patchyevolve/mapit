@@ -17,6 +17,23 @@ pub async fn run(target: &Path) -> Result<()> {
     println!("mapit status");
     println!("  Nodes : {}", store.node_count()?);
     println!("  Edges : {}", store.edge_count()?);
+    println!("  Funcs : {}", store.function_count()?);
+    let flaw_count = store.flaw_count(None)?;
+    println!("  Flaws : {}", flaw_count);
+    if flaw_count > 0 {
+        let hi = store.flaw_count(Some("high"))?;
+        let warn = store.flaw_count(Some("warning"))?;
+        let info = store.flaw_count(Some("info"))?;
+        if hi > 0 {
+            println!("         high: {hi}");
+        }
+        if warn > 0 {
+            println!("         warning: {warn}");
+        }
+        if info > 0 {
+            println!("         info: {info}");
+        }
+    }
     if let Some(t) = &cfg.last_full_map_at {
         println!("  Last full map   : {t}");
     }
