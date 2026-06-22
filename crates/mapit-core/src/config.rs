@@ -74,6 +74,57 @@ impl Default for ProjectConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Credentials file (~/.config/mapit/credentials.json)
+// See docs/05-backend-schema.md §2.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Credentials {
+    pub schema_version: u32,
+    pub providers: std::collections::HashMap<String, ProviderCredential>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCredential {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+impl Default for Credentials {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            providers: std::collections::HashMap::new(),
+        }
+    }
+}
+
+pub fn load_credentials(config_dir: &Path) -> Result<Credentials> {
+    let path = config_dir.join("credentials.json");
+    if !path.exists() {
+        return Ok(Credentials::default());
+    }
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    let creds: Credentials = serde_json::from_str(&text)
+        .with_context(|| format!("parsing {}", path.display()))?;
+    Ok(creds)
+}
+
+pub fn save_credentials(config_dir: &Path, creds: &Credentials) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(config_dir)?;
+    let path = config_dir.join("credentials.json");
+    let text = serde_json::to_string_pretty(creds)?;
+    std::fs::write(&path, text)
+        .with_context(|| format!("writing {}", path.display()))?;
+    // Restrict to 0600 (owner read/write only)
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // I/O helpers
 // ---------------------------------------------------------------------------
 

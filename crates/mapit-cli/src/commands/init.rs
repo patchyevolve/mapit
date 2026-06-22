@@ -245,11 +245,23 @@ fn setup_openai_compatible(config_dir: &std::path::Path, provider_name: &str) ->
 
     let cfg = GlobalConfig {
         default_provider: "openai-compatible".to_owned(),
-        default_model: model,
-        ollama_base_url: base_url,
+        default_model: model.clone(),
+        ollama_base_url: base_url.clone(),
         ..Default::default()
     };
     config::save_global_config(config_dir, &cfg)?;
+
+    // Save API key to credentials.json (separate file, restricted permissions)
+    let mut credentials = config::load_credentials(config_dir).unwrap_or_default();
+    credentials.providers.insert(
+        "openai-compatible".to_owned(),
+        config::ProviderCredential {
+            base_url,
+            api_key,
+            model,
+        },
+    );
+    config::save_credentials(config_dir, &credentials)?;
     Ok(())
 }
 

@@ -15,6 +15,7 @@ use mapit_core::{
     },
 };
 
+
 pub async fn run(target: &Path, all: bool, force: bool) -> Result<()> {
     let mapit_dir = target.join(".mapit");
     let db_path = mapit_dir.join("graph.sqlite");
@@ -207,11 +208,20 @@ fn create_provider(
         "ollama" => Ok(Box::new(OllamaProvider {
             base_url: global.ollama_base_url.clone(),
         })),
-        "openai-compatible" => Ok(Box::new(OpenAiCompatibleProvider {
-            base_url: global.ollama_base_url.clone(),
-            api_key: String::new(),
-            model: global.default_model.clone(),
-        })),
+        "openai-compatible" => {
+            let config_dir = mapit_core::config::global_config_dir();
+            let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
+            let api_key = creds
+                .providers
+                .get("openai-compatible")
+                .map(|c| c.api_key.clone())
+                .unwrap_or_default();
+            Ok(Box::new(OpenAiCompatibleProvider {
+                base_url: global.ollama_base_url.clone(),
+                api_key,
+                model: global.default_model.clone(),
+            }))
+        }
         other => anyhow::bail!("Unknown provider '{other}'. Use 'ollama' or 'openai-compatible'."),
     }
 }
