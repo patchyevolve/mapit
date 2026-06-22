@@ -1,0 +1,24 @@
+[package]
+name = "mapit-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mapit"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+clap = { version = "4.5.40", features = ["derive"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+chrono = { workspace = true }
+mapit-core = { path = "../mapit-core" }
+mapit-ai = { path = "../mapit-ai" }
+mapit-server = { path = "../mapit-server" }

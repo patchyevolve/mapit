@@ -1,0 +1,16 @@
+[package]
+name = "mapit-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+axum = { version = "0.8.4", features = ["ws"] }
+tower-http = { version = "0.6.6", features = ["cors", "fs"] }
+mapit-core = { path = "../mapit-core" }
+mapit-ai = { path = "../mapit-ai" }

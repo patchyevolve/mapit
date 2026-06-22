@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Cargo lock is kept for binaries (committed intentionally)
+# Cargo.lock
+
+# mapit metadata (written by mapit itself when run on this repo)
+.mapit/
+
+# Node / web build artifacts
+web/mapit-web/node_modules/
+web/mapit-web/dist/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build output logs used during development
+.mapit_build.txt
+.mapit_test.txt
+.mapit_results.txt
