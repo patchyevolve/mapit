@@ -1,0 +1,7 @@
+thread 'languages::cpp::tests::finds_method_with_scope' (814661) panicked at crates/mapit-core/src/languages/cpp.rs:390:9:
+test languages::cpp::tests::finds_include ... ok
+test languages::cpp::tests::finds_class ... ok
+test languages::cpp::tests::finds_free_function ... ok
+test languages::cpp::tests::finds_call ... ok
+test languages::cpp::tests::finds_method_with_scope ... FAILED
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.00s

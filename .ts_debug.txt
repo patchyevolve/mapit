@@ -1,0 +1,9 @@
+SEXP:
+(translation_unit (class_specifier name: (type_identifier) body: (field_declaration_list (access_specifier) (function_definition type: (primitive_type) declarator: (function_declarator declarator: (field_identifier) parameters: (parameter_list)) body: (compound_statement)))))
+
+class kind: class_specifier
+  child[0] kind=class field=None
+  child[1] kind=type_identifier field=Some("name")
+  child[2] kind=field_declaration_list field=Some("body")
+
+body via field_name: Some("field_declaration_list")

@@ -1,0 +1,59 @@
+On branch main
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   .gitignore
+	new file:   Cargo.lock
+	new file:   Cargo.toml
+	new file:   crates/mapit-ai/Cargo.toml
+	new file:   crates/mapit-ai/src/lib.rs
+	new file:   crates/mapit-ai/src/ollama.rs
+	new file:   crates/mapit-ai/src/openai_compatible.rs
+	new file:   crates/mapit-ai/src/provider.rs
+	new file:   crates/mapit-ai/src/tasks.rs
+	new file:   crates/mapit-cli/Cargo.toml
+	new file:   crates/mapit-cli/src/commands/annotate.rs
+	new file:   crates/mapit-cli/src/commands/ask.rs
+	new file:   crates/mapit-cli/src/commands/config.rs
+	new file:   crates/mapit-cli/src/commands/default_run.rs
+	new file:   crates/mapit-cli/src/commands/explain.rs
+	new file:   crates/mapit-cli/src/commands/find.rs
+	new file:   crates/mapit-cli/src/commands/flaws.rs
+	new file:   crates/mapit-cli/src/commands/init.rs
+	new file:   crates/mapit-cli/src/commands/map.rs
+	new file:   crates/mapit-cli/src/commands/mod.rs
+	new file:   crates/mapit-cli/src/commands/open.rs
+	new file:   crates/mapit-cli/src/commands/projects.rs
+	new file:   crates/mapit-cli/src/commands/status.rs
+	new file:   crates/mapit-cli/src/commands/trace.rs
+	new file:   crates/mapit-cli/src/main.rs
+	new file:   crates/mapit-core/Cargo.toml
+	new file:   crates/mapit-core/src/config.rs
+	new file:   crates/mapit-core/src/control_flow.rs
+	new file:   crates/mapit-core/src/graph/builder.rs
+	new file:   crates/mapit-core/src/graph/incremental.rs
+	new file:   crates/mapit-core/src/graph/mod.rs
+	new file:   crates/mapit-core/src/graph/model.rs
+	new file:   crates/mapit-core/src/graph/store.rs
+	new file:   crates/mapit-core/src/languages/asm.rs
+	new file:   crates/mapit-core/src/languages/c.rs
+	new file:   crates/mapit-core/src/languages/cpp.rs
+	new file:   crates/mapit-core/src/languages/javascript.rs
+	new file:   crates/mapit-core/src/languages/mod.rs
+	new file:   crates/mapit-core/src/languages/python.rs
+	new file:   crates/mapit-core/src/languages/rust.rs
+	new file:   crates/mapit-core/src/lib.rs
+	new file:   crates/mapit-core/src/walker.rs
+	new file:   crates/mapit-core/tests/fixtures/three_file_rust/src/lib.rs
+	new file:   crates/mapit-core/tests/fixtures/three_file_rust/src/main.rs
+	new file:   crates/mapit-core/tests/fixtures/three_file_rust/src/utils.rs
+	new file:   crates/mapit-core/tests/phase1_integration.rs
+	new file:   crates/mapit-server/Cargo.toml
+	new file:   crates/mapit-server/src/api/mod.rs
+	new file:   crates/mapit-server/src/lib.rs
+	new file:   crates/mapit-server/src/state.rs
+	new file:   crates/mapit-server/src/ws.rs
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.git_status.txt
+
