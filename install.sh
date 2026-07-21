@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mapit installer — run: curl -sfSL https://github.com/ORG/mapit/releases/latest/download/install.sh | sh
+# mapit installer — run: curl -sfSL https://raw.githubusercontent.com/patchyevolve/mapit/main/install.sh | sh
 
 set -euo pipefail
 
