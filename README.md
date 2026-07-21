@@ -8,7 +8,7 @@
                    |_|  |_/_/   \_\_|  |___\___/
 ```
 
-mapit scans your source code, builds a complete call graph using tree-sitter, and lets you explore it through a web UI and an interactive terminal. Think of it like a live map of your codebase — what calls what, which files depend on what, how functions flow into each other.
+Personal tool that scans a codebase with tree-sitter, builds a call graph, and lets you explore it through a web UI or interactive terminal. Helps with understanding larger projects — what calls what, what depends on what, how functions connect.
 
 Works with Rust, C, C++, Python, JavaScript, TypeScript, and assembly.
 
@@ -197,7 +197,3 @@ The frontend auto-rebuilds when source files change under `web/`. If the built f
 - [react-force-graph-2d](https://github.com/vasturiano/react-force-graph-2d) — graph visualization
 - [axum](https://github.com/tokio-rs/axum) — web server
 - [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) — WebSocket for live progress
-
-## License
-
-MIT
