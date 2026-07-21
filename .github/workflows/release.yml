@@ -66,19 +66,21 @@ jobs:
       - name: Create archive
         shell: bash
         run: |
-          cd dist
           ARCHIVE_NAME="mapit-${{ matrix.target }}"
           if [[ "${{ matrix.target }}" == *-windows-* ]]; then
-            7z a "../${ARCHIVE_NAME}.zip" mapit.exe
+            7z a "${ARCHIVE_NAME}.zip" dist/mapit.exe
           else
-            tar czf "../${ARCHIVE_NAME}.tar.gz" mapit
+            tar czf "${ARCHIVE_NAME}.tar.gz" -C dist mapit
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mapit-${{ matrix.target }}
-          path: dist/
+          path: |
+            dist/
+            *.tar.gz
+            *.zip
 
   release:
     name: Create release
