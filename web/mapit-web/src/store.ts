@@ -70,7 +70,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_BG_PROGRESS":
       return { ...state, bgProgress: action.progress };
     case "TICK_BG_PROGRESS":
-      // Only tick if bgProgress exists — WS events during initial load won't create a panel
       if (!state.bgProgress) return state;
       return {
         ...state,

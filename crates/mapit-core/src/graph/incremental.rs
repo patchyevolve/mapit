@@ -16,10 +16,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-// ---------------------------------------------------------------------------
-// Data types
-// ---------------------------------------------------------------------------
-
 /// Per-file entry stored in both `manifest.json` and the SQLite table.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManifestEntry {
@@ -60,10 +56,6 @@ pub enum FileStatus {
     Added,
     Deleted,
 }
-
-// ---------------------------------------------------------------------------
-// manifest.json I/O
-// ---------------------------------------------------------------------------
 
 /// Load `manifest.json` from the `.mapit/` directory.
 /// Returns an empty manifest if the file doesn't exist.
@@ -125,10 +117,6 @@ pub fn rebuild_manifest_from_store(
     Ok(manifest)
 }
 
-// ---------------------------------------------------------------------------
-// Diffing
-// ---------------------------------------------------------------------------
-
 /// Diff current file hashes against the stored manifest.
 /// Returns a map of relative_path → FileStatus for every file.
 /// `Unchanged` files are included so callers can skip re-processing them.
@@ -162,24 +150,18 @@ pub fn diff_manifest(
     result
 }
 
-/// Count of files that need re-processing (Modified + Added + Deleted).
 pub fn changed_count(diff: &HashMap<String, FileStatus>) -> usize {
     diff.values()
         .filter(|s| **s != FileStatus::Unchanged)
         .count()
 }
 
-/// Return only the paths that need re-processing.
 pub fn changed_paths(diff: &HashMap<String, FileStatus>) -> Vec<&str> {
     diff.iter()
         .filter(|(_, s)| **s != FileStatus::Unchanged)
         .map(|(p, _)| p.as_str())
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

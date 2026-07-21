@@ -238,7 +238,6 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
         }
     }
 
-    // Pre-check: does this directory have any supported source files?
     let source_files = mapit_core::walker::walk(target, &[])?;
     if source_files.is_empty() {
         println!("\x1b[33m⚠ No supported source files found in this directory.\x1b[0m");
@@ -268,7 +267,6 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
     println!("\x1b[36m→ Running structural mapping...\x1b[0m");
     super::map::run(target, false).await?;
 
-    // Save to projects list
     if let Ok(abs) = target.canonicalize() {
         let projects_path = config_dir.join("projects.json");
         let mut projects: Vec<String> = if projects_path.exists() {
@@ -292,7 +290,6 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
         println!("\x1b[32m✓ First map complete.\x1b[0m");
     }
 
-    // Start server and open browser — auto-bind if port is busy
     let global = config::load_global_config(&config_dir).unwrap_or_default();
     let preferred = cli_port.unwrap_or(global.ui_preferences.preferred_port);
 
@@ -313,7 +310,6 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
         }
     });
 
-    // Small delay for server to start
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     if webbrowser::open(&format!("http://127.0.0.1:{port}")).is_ok() {

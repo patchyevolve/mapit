@@ -118,9 +118,7 @@ struct SourceQuery {
     end: Option<u32>,
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 async fn project_handler(
     State(state): State<Arc<AppState>>,
@@ -145,7 +143,6 @@ async fn project_handler(
         0.0
     };
 
-    // Read project config for timestamps
     let project_cfg = mapit_core::config::load_project_config(&state.mapit_dir).unwrap_or_default();
 
     let config_dir = mapit_core::config::global_config_dir();
@@ -241,7 +238,6 @@ async fn neighbors_handler(
         current = next;
     }
 
-    // Add the center node
     if let Ok(Some(center)) = store.get_node(&id) {
         collected_nodes.push(serialize_node(&center));
     }
@@ -280,7 +276,6 @@ async fn trace_handler(
             )
         })?;
 
-    // Check if node has CFG data
     let cfgs = if let Node::Function(f) = &node {
         f.control_flow.as_ref()
     } else {
@@ -298,7 +293,6 @@ async fn trace_handler(
         for path in &paths {
             for block_id in &path.blocks {
                 let block = block_idx.get(block_id).and_then(|i| cfg.blocks.get(*i));
-                // Resolve edge_ids to full node objects for the frontend
                 let calls: Vec<Value> = block
                     .map(|b| {
                         b.calls_in_block
@@ -796,7 +790,6 @@ async fn annotate_handler(
     let ws_tx = state.ws_tx.clone();
     let cancel_flag = state.cancel_flag.clone();
 
-    // Reset cancel flag for fresh run
     cancel_flag.store(false, Ordering::SeqCst);
 
     let handle = tokio::task::spawn_blocking(move || {
@@ -842,7 +835,6 @@ async fn annotate_handler(
 
         let skip_flaws = body.skip_flaws.unwrap_or(false);
 
-        // ── Phase 0: Project-level overview ────────────────────────────
         // One cheap AI call to understand the whole system before summarizing
         // individual functions. The overview is injected into every batch prompt
         // so each function summary understands its role in the larger system.
@@ -883,8 +875,6 @@ async fn annotate_handler(
             }
         };
 
-        // ── Pass 1: Batch summarize by file ────────────────────────────
-        // Group function nodes by file_path so we can call the AI once per file
         let mut by_file: std::collections::HashMap<&str, Vec<&Node>> = std::collections::HashMap::new();
         for node in &function_nodes {
             let fp = node.base().file_path.as_deref().unwrap_or("unknown");
@@ -944,7 +934,6 @@ async fn annotate_handler(
         for file_path in sorted_fps {
             let nodes_in_file = &by_file[file_path];
 
-            // Abort early if provider is down (5 consecutive failures)
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                 warn!("Aborting annotation — {consecutive_failures} consecutive files failed (provider may be down)");
                 let                 _ = ws_tx.send(json!({
@@ -964,7 +953,6 @@ async fn annotate_handler(
                 return anyhow::Ok(0);
             }
 
-            // Build per-function descriptions with source code (first 15 lines) and caller context
             let language = nodes_in_file[0].base().language.as_deref().unwrap_or("");
             let mut descs = Vec::new();
             let mut name_to_node: std::collections::HashMap<&str, &Node> = std::collections::HashMap::new();
@@ -1004,7 +992,6 @@ async fn annotate_handler(
                 }).to_string(),
             );
 
-            // Batch summarize all functions in this file
             let batch_result = tasks::summarize_batch(
                 provider.as_ref(),
                 model,
@@ -1030,7 +1017,6 @@ async fn annotate_handler(
                             applied.insert(entry.name.as_str());
                         }
                     }
-                    // Mark any functions the AI skipped as Unavailable
                     for (name, node) in &name_to_node {
                         if !applied.contains(name) {
                             let mut updated = (*node).clone();
@@ -1041,7 +1027,6 @@ async fn annotate_handler(
                 }
                 Err(e) => {
                     consecutive_failures += 1;
-                    // Batch failed — mark ALL functions in this file Unavailable
                     let err_msg = format!("Batch summarize failed for {file_path}: {e}");
                     error!("{err_msg}");
                     for node in nodes_in_file {
@@ -1057,13 +1042,11 @@ async fn annotate_handler(
                             "detail": "Check Settings → API Connection or try a different model/provider."
                         }).to_string(),
                     );
-                    // Continue to next file rather than aborting the whole run
                     processed_count += nodes_in_file.len();
                     continue;
                 }
             }
 
-            // ── Optional: Batch flaw flagging by file ──────────────────
             if !skip_flaws {
                 let mut flaw_descs = Vec::new();
                 for node in nodes_in_file {
@@ -1153,7 +1136,6 @@ Source code:
             processed_count += nodes_in_file.len();
         }
 
-        // ── 2. File-level summarization ──────────────────────────────────────
         let all_annotated = store.get_all_nodes()?;
         let mut file_children: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
         for n in &all_annotated {
@@ -1251,9 +1233,7 @@ async fn cancel_annotate_handler(
     Json(json!({ "status": "cancelling" }))
 }
 
-// ---------------------------------------------------------------------------
 // Simulation handler
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct SimulateBody {
@@ -1542,7 +1522,6 @@ async fn ask_handler(
     let referenced: Vec<String> = results.iter().map(|n| n.id().to_string()).collect();
     let question = body.question;
 
-    // Try to use AI
     let mapit_dir = state.project_root.join(".mapit");
     let global_cfg = load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
     let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
@@ -1578,7 +1557,6 @@ async fn ask_handler(
         }))
     };
 
-    // Build AI context from matching nodes
     let mut context_parts: Vec<String> = Vec::new();
     for node in results.iter().take(15) {
         let base = node.base();
@@ -1595,7 +1573,7 @@ async fn ask_handler(
         if let Some(s) = &base.ai_summary {
             part.push_str(&format!("  Summary: {s}\n"));
         }
-        // Also include the file-level summary if available
+
         if let Some(fp) = base.file_path.as_deref() {
             if let Some(fs) = file_summaries.get(fp) {
                 part.push_str(&format!("  File overview: {fs}\n"));
@@ -1845,9 +1823,7 @@ async fn test_chat_handler(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Serialization helper
-// ---------------------------------------------------------------------------
 
 fn node_type_str(node: &Node) -> &'static str {
     match node {
@@ -1877,7 +1853,6 @@ fn serialize_node(node: &Node) -> Value {
         "structural_hash": base.structural_hash,
         "flaws": base.flaws,
     });
-    // Merge in type-specific fields
     match node {
         Node::Function(f) => {
             if let Some(obj) = fields.as_object_mut() {

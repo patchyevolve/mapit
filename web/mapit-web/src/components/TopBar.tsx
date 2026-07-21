@@ -18,7 +18,6 @@ export function TopBar() {
 
   const handleRemap = async () => {
     setRemapping(true);
-    // Show progress bar immediately (indeterminate until first WS event)
     dispatch({
       type: "SET_BG_PROGRESS",
       progress: {
@@ -44,7 +43,6 @@ export function TopBar() {
 
   const handleAnnotate = async () => {
     setAnnotating(true);
-    // Show progress bar immediately (indeterminate until first WS event)
     dispatch({
       type: "SET_BG_PROGRESS",
       progress: {
@@ -87,7 +85,6 @@ export function TopBar() {
       <div className="flex items-center gap-2">
         <SearchBar />
 
-        {/* Ask AI */}
         <button
           type="button"
           className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
@@ -117,7 +114,6 @@ export function TopBar() {
           Ask AI
         </button>
 
-        {/* Flaws */}
         <button
           type="button"
           className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
@@ -169,7 +165,6 @@ export function TopBar() {
           )}
         </button>
 
-        {/* Settings */}
         <button
           type="button"
           className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border transition-all focus:ring-2 focus:ring-mapit-accent focus:outline-none ${
@@ -202,7 +197,6 @@ export function TopBar() {
           Settings
         </button>
 
-        {/* Annotate */}
         <button
           type="button"
           disabled={annotating}
@@ -230,7 +224,6 @@ export function TopBar() {
           {annotating ? "Annotating…" : "Annotate"}
         </button>
 
-        {/* Re-Map */}
         <button
           type="button"
           disabled={remapping}
@@ -259,7 +252,6 @@ export function TopBar() {
         </button>
       </div>
 
-      {/* Toast notification */}
       {toast && (
         <div
           className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 px-4 py-2 rounded-lg shadow-lg text-sm border max-w-sm text-center pointer-events-none ${

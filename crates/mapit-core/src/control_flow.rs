@@ -17,10 +17,6 @@ pub use crate::graph::model::{
 };
 use crate::graph::model::{EdgeType, compute_edge_id};
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /// Language selector for CFG extraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CfgLanguage {
@@ -45,10 +41,6 @@ pub fn extract_cfg(
     Ok(extractor.finish())
 }
 
-// ---------------------------------------------------------------------------
-// Extractor internals
-// ---------------------------------------------------------------------------
-
 /// Find the first compound-statement or block child of a node.
 /// Free function (not a method) to avoid borrow conflicts when called
 /// before a mutable `self` borrow.
@@ -66,9 +58,7 @@ struct CfgExtractor<'a> {
     caller_node_id: &'a str,
     blocks: Vec<ControlFlowBlock>,
     next_block_id: usize,
-    /// ID of the first block created
     entry_block_id: Option<String>,
-    /// Global call order counter across all blocks
     call_order: i32,
 }
 
@@ -168,21 +158,12 @@ impl<'a> CfgExtractor<'a> {
                     self.visit_stmt(inner, current_block, source, lang);
                 }
             }
-            // ----------------------------------------------------------------
-            // Rust: if / if-let expressions
-            // ----------------------------------------------------------------
             "if_expression" | "if_statement" => {
                 self.handle_if(node, current_block, source, lang);
             }
-            // ----------------------------------------------------------------
-            // Rust: match expression
-            // ----------------------------------------------------------------
             "match_expression" => {
                 self.handle_match(node, current_block, source, lang);
             }
-            // ----------------------------------------------------------------
-            // Rust/C: loop / while / for
-            // ----------------------------------------------------------------
             "loop_expression"
             | "while_expression"
             | "for_expression"
@@ -191,20 +172,10 @@ impl<'a> CfgExtractor<'a> {
             | "do_statement" => {
                 self.handle_loop(node, current_block, source, lang);
             }
-            // ----------------------------------------------------------------
-            // C: if statement
-            // ----------------------------------------------------------------
             // (covered by if_statement above)
-
-            // ----------------------------------------------------------------
-            // C: switch statement
-            // ----------------------------------------------------------------
             "switch_statement" => {
                 self.handle_switch(node, current_block, source, lang);
             }
-            // ----------------------------------------------------------------
-            // Return
-            // ----------------------------------------------------------------
             "return_expression" | "return_statement" => {
                 let call_refs = self.extract_calls_from_expr(node, source);
                 for (called_name, line) in call_refs {
@@ -212,9 +183,6 @@ impl<'a> CfgExtractor<'a> {
                 }
                 current_block.kind = BlockKind::Return;
             }
-            // ----------------------------------------------------------------
-            // Generic statement / expression — collect calls
-            // ----------------------------------------------------------------
             _ => {
                 if matches!(node.kind(), "block" | "block_expression" | "compound_statement") {
                     self.visit_block_children(node, current_block, source, lang);
@@ -228,9 +196,6 @@ impl<'a> CfgExtractor<'a> {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // If/else handler — creates branch block
-    // -------------------------------------------------------------------------
     /// Wire the exit blocks of a body subgraph to a merge block.
     /// Exit blocks are those with empty `next_blocks` — they are the terminal
     /// blocks of the body's subgraph.  For simple sequential bodies this is
@@ -267,7 +232,6 @@ impl<'a> CfgExtractor<'a> {
     ) {
         let condition_text = self.extract_condition_text(node, source);
 
-        // Create the "then" block
         let then_id = self.new_block_id();
         let mut then_block = ControlFlowBlock {
             id: then_id.clone(),
@@ -284,7 +248,6 @@ impl<'a> CfgExtractor<'a> {
             self.visit_block_children(body, &mut then_block, source, lang);
         }
 
-        // Create the "else" block (may be empty)
         let else_id = self.new_block_id();
         let mut else_block = ControlFlowBlock {
             id: else_id.clone(),
@@ -293,7 +256,6 @@ impl<'a> CfgExtractor<'a> {
             next_blocks: Vec::new(),
         };
 
-        // Visit the else-body if present
         let before_else = self.blocks.len();
         let has_else = if let Some(alt) = node.child_by_field_name("alternative") {
             self.visit_block_children(alt, &mut else_block, source, lang);
@@ -302,7 +264,6 @@ impl<'a> CfgExtractor<'a> {
             false
         };
 
-        // Create a merge block that both branches flow into
         let merge_id = self.new_block_id();
         let merge_block = ControlFlowBlock {
             id: merge_id.clone(),
@@ -311,11 +272,9 @@ impl<'a> CfgExtractor<'a> {
             next_blocks: Vec::new(),
         };
 
-        // Wire exit blocks of each body → merge (not the entry blocks)
         self.wire_exits_to_merge(&mut then_block, before_then, &merge_id);
         self.wire_exits_to_merge(&mut else_block, before_else, &merge_id);
 
-        // Make the current (pre-if) block a Branch that points to then + else
         current_block.kind = BlockKind::Branch;
         current_block.next_blocks.push(BlockTransition {
             block_id: then_id,
@@ -336,9 +295,6 @@ impl<'a> CfgExtractor<'a> {
         self.push_block(merge_block);
     }
 
-    // -------------------------------------------------------------------------
-    // Match handler — each arm becomes a branch
-    // -------------------------------------------------------------------------
     fn handle_match(
         &mut self,
         node: Node,
@@ -354,7 +310,6 @@ impl<'a> CfgExtractor<'a> {
         let merge_id = self.new_block_id();
         current_block.kind = BlockKind::Branch;
 
-        // Iterate match arms
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for arm in body.children(&mut cursor) {
@@ -405,9 +360,6 @@ impl<'a> CfgExtractor<'a> {
         current_block.kind = BlockKind::Sequential;
     }
 
-    // -------------------------------------------------------------------------
-    // Loop handler
-    // -------------------------------------------------------------------------
     fn handle_loop(
         &mut self,
         node: Node,
@@ -423,7 +375,6 @@ impl<'a> CfgExtractor<'a> {
             next_blocks: Vec::new(),
         };
 
-        // Extract loop condition for while/for
         let condition = match node.kind() {
             "while_expression" | "while_statement" => node
                 .child_by_field_name("condition")
@@ -442,14 +393,12 @@ impl<'a> CfgExtractor<'a> {
             _ => None,
         };
 
-        // Visit body
         let body = node.child_by_field_name("body")
             .or_else(|| find_compound_child(node));
         if let Some(body) = body {
             self.visit_block_children(body, &mut loop_block, source, lang);
         }
 
-        // After loop block
         let after_id = self.new_block_id();
         let after_block = ControlFlowBlock {
             id: after_id.clone(),
@@ -472,9 +421,6 @@ impl<'a> CfgExtractor<'a> {
         self.push_block(after_block);
     }
 
-    // -------------------------------------------------------------------------
-    // C switch handler
-    // -------------------------------------------------------------------------
     fn handle_switch(
         &mut self,
         node: Node,
@@ -517,7 +463,6 @@ impl<'a> CfgExtractor<'a> {
                 }
             }
 
-            // Wire case blocks with fallthrough: case_i → case_{i+1}, last → merge
             for i in 0..case_blocks.len() {
                 let next_id = if i + 1 < case_blocks.len() {
                     case_blocks[i + 1].1.id.clone()
@@ -530,7 +475,6 @@ impl<'a> CfgExtractor<'a> {
                 });
             }
 
-            // Wire current_block (Branch) → each case block
             for (label, blk) in &case_blocks {
                 current_block.next_blocks.push(BlockTransition {
                     block_id: blk.id.clone(),
@@ -538,7 +482,6 @@ impl<'a> CfgExtractor<'a> {
                 });
             }
 
-            // Push all case blocks
             for (_, blk) in case_blocks {
                 self.push_block(blk);
             }
@@ -553,9 +496,6 @@ impl<'a> CfgExtractor<'a> {
         self.push_block(merge_block);
     }
 
-    // -------------------------------------------------------------------------
-    // Call extraction from an expression subtree
-    // -------------------------------------------------------------------------
     fn extract_calls_from_expr(&self, node: Node, source: &str) -> Vec<(String, u32)> {
         let mut calls = Vec::new();
         self.collect_calls(node, source, &mut calls);
@@ -572,7 +512,6 @@ impl<'a> CfgExtractor<'a> {
                 if !name.is_empty() {
                     out.push((name, node.start_position().row as u32 + 1));
                 }
-                // Recurse into both function and arguments for nested calls
                 if let Some(func) = node.child_by_field_name("function") {
                     let mut cursor = func.walk();
                     for child in func.children(&mut cursor) {
@@ -586,7 +525,6 @@ impl<'a> CfgExtractor<'a> {
                     }
                 }
             }
-            // Rust macro invocations
             "macro_invocation" => {
                 let name = node
                     .child_by_field_name("macro")
@@ -625,7 +563,6 @@ impl<'a> CfgExtractor<'a> {
     }
 
     fn add_call(&mut self, block: &mut ControlFlowBlock, called_name: &str, _line: u32) {
-        // Generate a stable edge_id for this call
         let edge_id = compute_edge_id(
             self.caller_node_id,
             called_name, // used as a proxy — real to_id resolved later
@@ -639,10 +576,6 @@ impl<'a> CfgExtractor<'a> {
         self.call_order += 1;
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     fn node_text<'s>(&self, node: Node, source: &'s str) -> &'s str {
         node.utf8_text(source.as_bytes()).unwrap_or("")
     }
@@ -655,12 +588,9 @@ impl<'a> CfgExtractor<'a> {
     }
 }
 
-/// A single path through a `ControlFlowGraph`, from entry to terminal.
 #[derive(Debug, Clone)]
 pub struct TracePath {
-    /// Human-readable label describing the conditions along this path.
     pub label: String,
-    /// Block IDs visited, in order.
     pub blocks: Vec<String>,
 }
 
@@ -673,7 +603,6 @@ pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
     let mut paths: Vec<TracePath> = Vec::new();
     let mut stack: Vec<(/* block_id */ String, /* visited */ Vec<String>, /* conditions */ Vec<String>)> = Vec::new();
 
-    // Quick lookup
     let block_map: std::collections::HashMap<&str, &ControlFlowBlock> = cfg
         .blocks
         .iter()
@@ -700,7 +629,6 @@ pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
         };
 
         if block.next_blocks.is_empty() {
-            // Terminal block — record this path
             let label = if conditions.is_empty() {
                 String::new()
             } else {
@@ -708,7 +636,6 @@ pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
             };
             paths.push(TracePath { label, blocks: visited });
         } else {
-            // Push successors in reverse so the first branch stays first
             for transition in block.next_blocks.iter().rev() {
                 let mut next_conditions = conditions.clone();
                 if let Some(ref cond) = transition.condition {
@@ -722,20 +649,14 @@ pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
     paths
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Extract CFG from a Rust function body (the { ... } block source).
     fn rust_cfg(body: &str) -> ControlFlowGraph {
         extract_cfg(CfgLanguage::Rust, body, "test_caller_id").unwrap()
     }
 
-    /// Extract CFG from a C function body.
     fn c_cfg(body: &str) -> ControlFlowGraph {
         extract_cfg(CfgLanguage::C, body, "test_caller_id").unwrap()
     }
@@ -757,13 +678,11 @@ mod tests {
         assert!(branch.is_some(), "expected a branch block");
         let branch = branch.unwrap();
         assert_eq!(branch.next_blocks.len(), 2, "branch must have 2 outgoing paths");
-        // Both transitions must have a condition label
         assert!(branch.next_blocks.iter().all(|t| t.condition.is_some()));
     }
 
     #[test]
     fn if_without_else_still_has_two_paths() {
-        // Even a bare `if` must produce two paths (taken / not taken)
         let cfg = rust_cfg("{ if x { foo(); } }");
         let branch = cfg.blocks.iter().find(|b| b.kind == BlockKind::Branch);
         assert!(branch.is_some());
@@ -787,7 +706,6 @@ mod tests {
         let cfg = rust_cfg(r#"{ match x { 1 => a(), 2 => b(), _ => c(), } }"#);
         let branch = cfg.blocks.iter().find(|b| b.kind == BlockKind::Branch);
         assert!(branch.is_some(), "expected branch for match");
-        // 3 arms
         assert_eq!(
             branch.unwrap().next_blocks.len(),
             3,
@@ -825,10 +743,6 @@ mod tests {
         let branch_count = cfg.blocks.iter().filter(|b| b.kind == BlockKind::Branch).count();
         assert!(branch_count >= 2, "nested if should produce ≥2 branch blocks, got {branch_count}");
     }
-
-    // -------------------------------------------------------------------------
-    // Trace-walk tests (Phase 3 "done when" criterion b)
-    // -------------------------------------------------------------------------
 
     #[test]
     fn trace_if_produces_two_labeled_paths() {
@@ -903,9 +817,7 @@ mod tests {
     fn trace_loop_produces_at_least_one_path() {
         let cfg = rust_cfg("{ loop { work(); } }");
         let paths = walk_trace(&cfg);
-        // A loop block + after-block merge → at least one path to terminal
         assert!(!paths.is_empty(), "loop should produce at least one trace path");
-        // The exit condition should mention "exit" or "not"
         for p in &paths {
             if !p.label.is_empty() {
                 assert!(

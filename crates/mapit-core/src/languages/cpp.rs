@@ -43,10 +43,6 @@ impl LanguageAdapter for CppAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// C++ extractor
-// ---------------------------------------------------------------------------
-
 struct CppExtractor<'a> {
     source: &'a str,
     #[allow(dead_code)]
@@ -357,10 +353,6 @@ impl<'a> CppExtractor<'a> {
 fn is_cpp_entry_point(name: &str) -> bool {
     matches!(name, "main" | "WinMain" | "wmain" | "wWinMain")
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

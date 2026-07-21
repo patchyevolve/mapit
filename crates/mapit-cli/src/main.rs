@@ -88,7 +88,6 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing — respects RUST_LOG env var.
     fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)

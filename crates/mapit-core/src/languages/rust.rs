@@ -49,10 +49,6 @@ impl LanguageAdapter for RustAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Internal extractor — walks the syntax tree
-// ---------------------------------------------------------------------------
-
 struct RustExtractor<'a> {
     source: &'a str,
     #[allow(dead_code)]
@@ -95,9 +91,6 @@ impl<'a> RustExtractor<'a> {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Handler: free function or method
-    // ------------------------------------------------------------------
     fn handle_function(&mut self, node: Node, is_method: bool) {
         let name = node
             .child_by_field_name("name")
@@ -124,7 +117,6 @@ impl<'a> RustExtractor<'a> {
             is_entry_point_candidate: is_entry,
         });
 
-        // Extract call references inside this function body
         if let Some(body) = node.child_by_field_name("body") {
             let mut call_visitor = CallVisitor {
                 source: self.source,
@@ -137,11 +129,7 @@ impl<'a> RustExtractor<'a> {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Handler: impl block — push scope, recurse into methods
-    // ------------------------------------------------------------------
     fn handle_impl(&mut self, node: Node) {
-        // Get the type name being impl'd
         let type_name = node
             .child_by_field_name("type")
             .map(|n| self.node_text(n).to_owned())
@@ -166,9 +154,6 @@ impl<'a> RustExtractor<'a> {
         self.scope_stack.pop();
     }
 
-    // ------------------------------------------------------------------
-    // Handler: struct / enum / type alias / union
-    // ------------------------------------------------------------------
     fn handle_type_def(&mut self, node: Node, kind: SymbolKind) {
         let name = node
             .child_by_field_name("name")
@@ -193,9 +178,6 @@ impl<'a> RustExtractor<'a> {
         });
     }
 
-    // ------------------------------------------------------------------
-    // Handler: macro_definition
-    // ------------------------------------------------------------------
     fn handle_macro(&mut self, node: Node) {
         let name = node
             .child_by_field_name("name")
@@ -219,12 +201,8 @@ impl<'a> RustExtractor<'a> {
         });
     }
 
-    // ------------------------------------------------------------------
-    // Handler: use declaration
-    // ------------------------------------------------------------------
     fn handle_use(&mut self, node: Node) {
         let text = self.node_text(node);
-        // Strip "use " prefix and trailing ";"
         let target = text
             .trim_start_matches("use ")
             .trim_end_matches(';')
@@ -238,9 +216,6 @@ impl<'a> RustExtractor<'a> {
         });
     }
 
-    // ------------------------------------------------------------------
-    // Handler: static / const
-    // ------------------------------------------------------------------
     fn handle_global(&mut self, node: Node) {
         let name = node
             .child_by_field_name("name")
@@ -263,10 +238,6 @@ impl<'a> RustExtractor<'a> {
             is_entry_point_candidate: false,
         });
     }
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
 
     fn is_pub(&self, node: Node) -> bool {
         let mut cursor = node.walk();
@@ -291,10 +262,6 @@ impl<'a> RustExtractor<'a> {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Call-expression visitor
-// ---------------------------------------------------------------------------
 
 struct CallVisitor<'a> {
     source: &'a str,
@@ -396,10 +363,6 @@ impl<'a> CallVisitor<'a> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entry-point heuristic
-// ---------------------------------------------------------------------------
-
 fn is_entry_point(name: &str, is_pub: bool) -> bool {
     // main is always an entry point candidate
     if name == "main" {
@@ -422,10 +385,6 @@ fn is_entry_point(name: &str, is_pub: bool) -> bool {
     // Any pub function could be called from outside the crate
     is_pub
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

@@ -15,10 +15,6 @@ use super::model::{
     compute_structural_hash,
 };
 
-// ---------------------------------------------------------------------------
-// Per-file input for the builder
-// ---------------------------------------------------------------------------
-
 pub struct FileInput<'a> {
     pub relative_path: &'a str,
     pub language: &'a str,
@@ -40,18 +36,10 @@ pub enum ParseResult<'a> {
     WithSource { output: AdapterOutput, source: &'a str },
 }
 
-// ---------------------------------------------------------------------------
-// Build output
-// ---------------------------------------------------------------------------
-
 pub struct BuildOutput {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
 }
-
-// ---------------------------------------------------------------------------
-// Builder
-// ---------------------------------------------------------------------------
 
 /// Build nodes and edges for a batch of files.
 ///
@@ -62,11 +50,6 @@ pub struct BuildOutput {
 /// 4. dynamic_unresolved — callee not found in project source; emits an
 ///    ExternalNode so the call is visible rather than silently dropped.
 pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
-    // -----------------------------------------------------------------------
-    // Pass 1: collect all definitions across all files keyed by qualified name
-    // and by simple name (for fallback resolution).
-    // -----------------------------------------------------------------------
-
     // qualified_name -> node_id
     let mut qualified_map: HashMap<String, String> = HashMap::new();
     // simple name -> list of (node_id, file_path) — for probable resolution
@@ -77,7 +60,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
     let mut nodes: Vec<Node> = Vec::new();
 
     for file in files {
-        // Always emit a FileNode for every walked file.
         let file_node = build_file_node(file);
         nodes.push(file_node);
 
@@ -118,7 +100,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
 
             let node = match def.kind {
                 SymbolKind::Function | SymbolKind::Method => {
-                    // Extract CFG if the language supports it and source is available
                     let cfg = extract_function_cfg(
                         file.language,
                         &def.source_text,
@@ -153,10 +134,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Pass 2: emit "defines" edges (FileNode -> child nodes)
-    // -----------------------------------------------------------------------
-
     let mut edges: Vec<Edge> = Vec::new();
 
     for file in files {
@@ -181,10 +158,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Pass 3: emit "includes" edges from import statements
-    // -----------------------------------------------------------------------
-
     for file in files {
         let file_node_id =
             compute_node_id(file.relative_path, &NodeType::File, "");
@@ -200,8 +173,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
                 || import.kind == ImportKind::Include
                 || import.kind == ImportKind::Import
             {
-                // Try to find the target file by matching the import path
-                // to a relative_path in the file set (best-effort, not exhaustive).
                 let target_id =
                     resolve_import_to_file(&import.target, files, &qualified_map);
 
@@ -222,10 +193,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Pass 4: emit "calls" edges from symbol references
-    // -----------------------------------------------------------------------
-
     // Reverse map: file node id -> relative path (for import-based resolution)
     let file_node_id_to_path: HashMap<String, String> = files
         .iter()
@@ -237,8 +204,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         })
         .collect();
 
-    // Build a mapping: file_path -> set of import target file paths (for
-    // confidence tiering in resolution).
     let mut import_map: HashMap<String, Vec<String>> = HashMap::new();
     for file in files {
         let imports = match &file.parse_result {
@@ -268,7 +233,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         };
 
         for reference in references {
-            // Find the caller node id
             let caller_id = match qualified_map.get(&reference.from_qualified_name) {
                 Some(id) => id.clone(),
                 None => {
@@ -280,7 +244,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
                 }
             };
 
-            // Resolve the callee
             let (callee_id, confidence) = resolve_call(
                 &reference.called_name,
                 file.relative_path,
@@ -293,7 +256,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
             let callee_id = match callee_id {
                 Some(id) => id,
                 None => {
-                    // Unresolvable — emit an ExternalNode + dynamic_unresolved edge
                     let ext_id = compute_node_id(
                         "<external>",
                         &NodeType::External,
@@ -339,7 +301,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
         }
     }
 
-    // Add external nodes to the output
     nodes.extend(external_nodes.into_values());
 
     debug!(
@@ -349,10 +310,6 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
     );
     Ok(BuildOutput { nodes, edges })
 }
-
-// ---------------------------------------------------------------------------
-// Resolution helpers
-// ---------------------------------------------------------------------------
 
 /// Resolve a call to (node_id, confidence), or None if truly unresolvable.
 fn resolve_call(
@@ -431,7 +388,6 @@ fn resolve_import_to_file(
     files: &[FileInput],
     _qualified_map: &HashMap<String, String>,
 ) -> Option<String> {
-    // Convert module path separators to filesystem path separators
     let as_path = target
         .replace("::", "/")
         .replace('.', "/")
@@ -450,10 +406,6 @@ fn resolve_import_to_file(
     }
     None
 }
-
-// ---------------------------------------------------------------------------
-// FileNode constructor
-// ---------------------------------------------------------------------------
 
 fn build_file_node(file: &FileInput) -> Node {
     let (parse_status, parse_error) = match &file.parse_result {
@@ -491,10 +443,6 @@ fn build_file_node(file: &FileInput) -> Node {
     })
 }
 
-// ---------------------------------------------------------------------------
-// CFG extraction helper
-// ---------------------------------------------------------------------------
-
 /// Try to extract a CFG for a function. Returns None on failure or unsupported
 /// language — CFG extraction failure must never abort the build (TRD §9).
 fn extract_function_cfg(
@@ -507,7 +455,6 @@ fn extract_function_cfg(
         "c" => CfgLanguage::C,
         _ => return None,
     };
-    // Only extract if the source looks like a function body (contains braces)
     if !function_source.contains('{') {
         return None;
     }
@@ -519,10 +466,6 @@ fn extract_function_cfg(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

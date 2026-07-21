@@ -33,10 +33,6 @@ impl LanguageAdapter for AsmAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
-
 fn parse_asm(source: &str, output: &mut AdapterOutput) {
     // Track which labels are currently "open" (i.e., we're inside their body).
     // For assembly we treat the region between one label and the next as that
@@ -55,7 +51,6 @@ fn parse_asm(source: &str, output: &mut AdapterOutput) {
             continue;
         }
 
-        // --- Label definition ---
         // Patterns: `label:`, `.label:`, `LABEL:` (NASM/GAS)
         if let Some(label) = try_parse_label(line) {
             // Close previous label region
@@ -69,7 +64,6 @@ fn parse_asm(source: &str, output: &mut AdapterOutput) {
             continue;
         }
 
-        // --- .globl / GLOBAL directive ---
         // These export a symbol to the linker — mark as entry point candidate.
         if let Some(sym) = try_parse_global_directive(line) {
             // We may not have seen the label yet; record it as a forward-declared
@@ -88,7 +82,6 @@ fn parse_asm(source: &str, output: &mut AdapterOutput) {
             continue;
         }
 
-        // --- call / jmp / jcc instructions ---
         if let Some(target) = try_parse_call_or_jump(line) {
             if let Some((ref caller_name, _)) = current_label {
                 output.references.push(SymbolReference {
@@ -161,10 +154,6 @@ fn dedup_definitions(output: &mut AdapterOutput) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Line parsers
-// ---------------------------------------------------------------------------
 
 /// Strip inline comment (`;` for NASM, `#` for GAS, `//` for some assemblers).
 fn strip_comment(line: &str) -> &str {
@@ -268,10 +257,6 @@ fn is_asm_entry_point(name: &str) -> bool {
             | "isr_handler"
     )
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

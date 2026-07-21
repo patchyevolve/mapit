@@ -94,7 +94,6 @@ export function FlawsReport() {
 
   return (
     <div className="flex flex-col h-full bg-mapit-bg">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-mapit-surface border-b border-mapit-border">
         <h2 className="text-sm font-semibold text-mapit-text">
           Flaws &amp; Issues
@@ -140,7 +139,6 @@ export function FlawsReport() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="px-4 py-2 bg-mapit-surface border-b border-mapit-border flex flex-wrap items-center gap-2 text-xs">
         <span className="text-mapit-muted">Severity:</span>
         {(["all", "high", "warning", "info"] as const).map((s) => (
@@ -190,7 +188,6 @@ export function FlawsReport() {
         ))}
       </div>
 
-      {/* List */}
       <div className="flex-1 overflow-y-auto p-4 min-h-0">
         <div className="bg-mapit-warning/10 border border-mapit-warning/30 rounded px-3 py-2 mb-4 text-xs text-mapit-text">
           ⚠ Flaws are AI-assisted heuristics, not guaranteed facts. Always

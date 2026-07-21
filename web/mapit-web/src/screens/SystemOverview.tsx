@@ -55,7 +55,6 @@ function FileView() {
 
   const file = fileNode as FileNode | undefined;
 
-  // Group by type for a summary pill bar
   const counts = useMemo(() => {
     const m: Record<string, number> = {};
     symbols.forEach((s) => {
@@ -93,7 +92,6 @@ function FileView() {
 
   return (
     <div className="flex flex-col h-full bg-mapit-bg">
-      {/* File header */}
       <div className="px-4 py-3 bg-mapit-surface border-b border-mapit-border">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -117,7 +115,6 @@ function FileView() {
                   {file.parse_status}
                 </span>
               )}
-              {/* Type summary pills */}
               {Object.entries(counts).map(([type, count]) => (
                 <span
                   key={type}
@@ -146,7 +143,6 @@ function FileView() {
             </button>
           </div>
         </div>
-        {/* Search within file */}
         <input
           type="text"
           placeholder="Search symbols in this file…"
@@ -156,7 +152,6 @@ function FileView() {
         />
       </div>
 
-      {/* Symbol list */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-mapit-muted text-sm">
@@ -177,7 +172,6 @@ function FileView() {
                     className="border-b border-mapit-border hover:bg-mapit-surface2 cursor-pointer group transition-colors"
                     onClick={() => openDetail(sym)}
                   >
-                    {/* Type badge */}
                     <td className="px-3 py-2 w-12 text-right">
                       <span
                         className={`font-mono text-xs ${NODE_TYPE_COLOR[sym.type] ?? "text-mapit-muted"}`}
@@ -186,12 +180,10 @@ function FileView() {
                       </span>
                     </td>
 
-                    {/* Name */}
                     <td className="px-2 py-2 font-mono text-mapit-text group-hover:text-mapit-accent transition-colors font-medium">
                       {sym.name}
                     </td>
 
-                    {/* AI summary (truncated) */}
                     <td className="px-2 py-2 text-xs text-mapit-muted max-w-xs hidden md:table-cell">
                       {sym.ai_summary_status === "pending" ? (
                         <span className="italic flex items-center gap-1">
@@ -205,7 +197,6 @@ function FileView() {
                       ) : null}
                     </td>
 
-                    {/* Flaw indicator */}
                     <td className="px-2 py-2 w-8 text-center">
                       {flaws.length > 0 && (
                         <span
@@ -217,7 +208,6 @@ function FileView() {
                       )}
                     </td>
 
-                    {/* Line number */}
                     <td className="px-3 py-2 w-16 text-right font-mono text-xs text-mapit-muted">
                       {span?.start_line ? `L${span.start_line}` : ""}
                     </td>
@@ -229,7 +219,6 @@ function FileView() {
         )}
       </div>
 
-      {/* Hint */}
       <div className="px-4 py-2 border-t border-mapit-border bg-mapit-surface text-xs text-mapit-muted">
         Click any symbol to open its detail panel → then use "Show call tree" or
         "▶ Trace execution"
@@ -287,7 +276,6 @@ function FeatureView() {
     dispatch({ type: "SET_SCREEN", screen: "expanded_file" });
   };
 
-  // Count symbols per file
   const symbolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     state.allNodes.forEach((n) => {
@@ -300,7 +288,6 @@ function FeatureView() {
 
   return (
     <div className="flex flex-col h-full bg-mapit-bg">
-      {/* Header */}
       <div className="px-4 py-3 bg-mapit-surface border-b border-mapit-border">
         <div className="flex items-center justify-between">
           <div>
@@ -340,7 +327,6 @@ function FeatureView() {
         />
       </div>
 
-      {/* File list */}
       <div className="flex-1 overflow-y-auto divide-y divide-mapit-border">
         {filtered.map((f) => {
           const file = f as FileNode;
@@ -352,7 +338,6 @@ function FeatureView() {
               className="w-full text-left px-4 py-2.5 hover:bg-mapit-surface2 transition-colors focus:ring-1 focus:ring-mapit-accent focus:outline-none group flex items-center gap-3"
               onClick={() => openFile(f)}
             >
-              {/* File icon */}
               <svg
                 className="flex-shrink-0 text-mapit-node-file w-4 h-4"
                 fill="none"
@@ -458,7 +443,6 @@ function FileBubbleGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 800, h: 600 });
 
-  // Resize observer
   useEffect(() => {
     if (!containerRef.current) return;
     const obs = new ResizeObserver((entries) => {
@@ -469,7 +453,6 @@ function FileBubbleGraph({
     return () => obs.disconnect();
   }, []);
 
-  // Get unique dirs and assign stable positions around a circle
   const dirs = useMemo(() => {
     const d = new Set<string>();
     files.forEach((f) => {
@@ -478,7 +461,6 @@ function FileBubbleGraph({
     return Array.from(d).sort();
   }, [files]);
 
-  // Compute target position per directory (arranged in a circle)
   const dirTargets = useMemo(() => {
     const m: Record<string, { x: number; y: number }> = {};
     const spread = Math.min(dims.w, dims.h) * 0.3;
@@ -503,7 +485,6 @@ function FileBubbleGraph({
         color: dirColor(dir),
         val: Math.max(5, Math.cbrt(count) * 4 + 4),
         symbolCount: count,
-        // Initial position near group target with jitter
         x: target.x + (hashStr(f.id) % 80) - 40,
         y: target.y + (hashStr(f.id + "y") % 80) - 40,
       };
@@ -521,7 +502,6 @@ function FileBubbleGraph({
 
     fg.d3Force("cluster", (alpha: number) => {
       const nodes = nodesRef.current as any[];
-      // Compute live centroids
       const sums: Record<string, { sx: number; sy: number; n: number }> = {};
       nodes.forEach((node) => {
         if (!sums[node.dir]) sums[node.dir] = { sx: 0, sy: 0, n: 0 };
@@ -529,7 +509,6 @@ function FileBubbleGraph({
         sums[node.dir].sy += node.y ?? 0;
         sums[node.dir].n++;
       });
-      // Also pull toward fixed target to keep groups separated
       nodes.forEach((node) => {
         const tgt = dirTargets[node.dir];
         if (!tgt) return;
@@ -539,10 +518,8 @@ function FileBubbleGraph({
         const liveCy = sums[node.dir]
           ? sums[node.dir].sy / sums[node.dir].n
           : tgt.y;
-        // Pull toward live centroid (keep group tight)
         node.vx = (node.vx ?? 0) - (node.x - liveCx) * alpha * 0.04;
         node.vy = (node.vy ?? 0) - (node.y - liveCy) * alpha * 0.04;
-        // Pull centroid toward fixed target (keep groups separated from each other)
         node.vx -= (liveCx - tgt.x) * alpha * 0.025;
         node.vy -= (liveCy - tgt.y) * alpha * 0.025;
       });
@@ -563,7 +540,6 @@ function FileBubbleGraph({
       const r = node.val as number;
       const alpha = 0.85;
 
-      // Bubble fill
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fillStyle =
@@ -573,12 +549,10 @@ function FileBubbleGraph({
           .padStart(2, "0");
       ctx.fill();
 
-      // Bubble border
       ctx.strokeStyle = node.color;
       ctx.lineWidth = 1.2 / globalScale;
       ctx.stroke();
 
-      // Label (only when large enough to read)
       const minLabelR = 10 / globalScale;
       if (r > minLabelR) {
         const maxChars = Math.floor((r * 2 * globalScale) / 7);
@@ -595,7 +569,6 @@ function FileBubbleGraph({
         }
       }
 
-      // Symbol count badge for large bubbles
       if (r > 18 / globalScale && node.symbolCount > 0) {
         const badgeFontSize = Math.min(r * 0.3, 9 / globalScale);
         ctx.font = `${badgeFontSize}px system-ui, sans-serif`;
@@ -608,7 +581,6 @@ function FileBubbleGraph({
     [],
   );
 
-  // Build legend
   const legendDirs = useMemo(() => {
     const seen = new Set<string>();
     const out: { dir: string; color: string; count: number }[] = [];
@@ -630,7 +602,6 @@ function FileBubbleGraph({
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
-      {/* Legend */}
       <div className="absolute top-3 left-3 z-10 bg-mapit-surface/90 border border-mapit-border rounded-lg p-2.5 backdrop-blur-sm max-w-[200px]">
         <p className="text-xs text-mapit-muted mb-1.5 font-semibold">
           Subsystems
@@ -651,7 +622,6 @@ function FileBubbleGraph({
         </div>
       </div>
 
-      {/* Hint */}
       <div className="absolute bottom-3 right-3 z-10 text-xs text-mapit-muted bg-mapit-surface/80 border border-mapit-border rounded px-2 py-1 backdrop-blur-sm">
         click bubble → open file
       </div>
@@ -695,7 +665,6 @@ function FileBrowser() {
     [state.allNodes],
   );
 
-  // Group files by top-level directory
   const groups = useMemo(() => {
     const map = new Map<string, Node[]>();
     allFiles.forEach((f) => {
@@ -736,7 +705,6 @@ function FileBrowser() {
 
   return (
     <div className="flex flex-col h-full bg-mapit-bg">
-      {/* Search */}
       <div className="px-4 py-3 bg-mapit-surface border-b border-mapit-border">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-mapit-text">
@@ -761,7 +729,6 @@ function FileBrowser() {
 
       <div className="flex-1 overflow-y-auto">
         {flatFiltered ? (
-          // Search results: flat list
           <div className="divide-y divide-mapit-border">
             {flatFiltered.length === 0 ? (
               <div className="text-center py-8 text-mapit-muted text-sm">
@@ -779,7 +746,6 @@ function FileBrowser() {
             )}
           </div>
         ) : (
-          // Directory groups
           groups.map(([dir, files]) => (
             <div key={dir || "__root"}>
               <button
@@ -893,7 +859,6 @@ function FileBrowserWithToggle() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toggle bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-mapit-surface border-b border-mapit-border">
         <span className="text-xs text-mapit-muted">
           {allFiles.length} files · {subsystemCount} subsystem
@@ -1072,7 +1037,6 @@ export function SystemOverview() {
       </div>
     ) : null;
 
-  // Route to the correct view
   const body = (() => {
     if (state.screen === "expanded_file") {
       return <FileView />;
@@ -1080,14 +1044,12 @@ export function SystemOverview() {
     if (state.screen === "expanded_feature") {
       return <FeatureView />;
     }
-    // Top-level overview
     if (state.features.length > 0) {
       return <FeatureGraph />;
     }
     if (allNodesArr.some((n) => n.type === "file")) {
       return <FileBrowserWithToggle />;
     }
-    // Empty state
     return (
       <div className="flex flex-col items-center justify-center h-full text-mapit-muted gap-3">
         <div className="text-lg font-medium">No map data found</div>

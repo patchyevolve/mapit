@@ -49,10 +49,6 @@ impl LanguageAdapter for CAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared helper — used by both C and C++ adapters
-// ---------------------------------------------------------------------------
-
 pub(crate) struct CExtractor<'a> {
     pub(crate) source: &'a str,
     #[allow(dead_code)]
@@ -118,7 +114,6 @@ impl<'a> CExtractor<'a> {
             is_entry_point_candidate: is_entry,
         });
 
-        // Extract calls from the function body
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor) {
@@ -308,10 +303,6 @@ fn is_c_entry_point(name: &str) -> bool {
             | "module_exit"
     )
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

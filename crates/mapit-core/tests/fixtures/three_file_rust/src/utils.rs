@@ -1,4 +1,3 @@
-// Fixture: utils.rs — defines double(), called from lib.rs
 pub fn double(x: u32) -> u32 {
     x * 2
 }

@@ -79,7 +79,6 @@ export default function App() {
           // We use two separate action types to route correctly in the reducer.
           dispatch({ type: "SET_MAP_PROGRESS", progress: prog });
 
-          // Also update bgProgress (will only show if screen is a loaded screen)
           dispatch({
             type: "TICK_BG_PROGRESS",
             current: event.current,
@@ -153,7 +152,6 @@ export default function App() {
     state.screen !== "connecting" && state.screen !== "map_progress";
 
   // ─── Whether bgProgress should be visible ──────────────────────────────────
-  // Only show when the graph is already loaded (not during initial map_progress screen)
   const showBgProgress = showShell && state.bgProgress !== null;
 
   const renderMain = () => {
@@ -181,7 +179,6 @@ export default function App() {
 
         <main className="flex-1 min-h-0 relative">{renderMain()}</main>
 
-        {/* Overlays */}
         {state.overlay?.kind === "function_detail" && (
           <div className="absolute top-0 right-0 h-full z-30 pointer-events-auto">
             <FunctionDetailPanel />
@@ -223,10 +220,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Background progress bar — bottom-right corner, non-blocking */}
         {showBgProgress && <BgProgressBar />}
 
-        {/* Error toast — shown when AI provider fails */}
         {errorToast && (
           <div className="fixed bottom-20 right-4 z-50 max-w-md bg-mapit-danger/10 border border-mapit-danger/40 text-mapit-danger px-4 py-3 rounded-xl shadow-2xl text-sm">
             <div className="flex items-start gap-2">

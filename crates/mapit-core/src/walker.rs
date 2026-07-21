@@ -11,13 +11,10 @@ use tracing::debug;
 /// A source file discovered during a walk.
 #[derive(Debug, Clone)]
 pub struct SourceFile {
-    /// Absolute path on disk.
     pub path: PathBuf,
     /// Path relative to the project root (used as the stable key everywhere).
     pub relative_path: String,
-    /// Detected language id, e.g. "rust", "c", "python".
     pub language: String,
-    /// File size in bytes.
     pub size_bytes: u64,
 }
 

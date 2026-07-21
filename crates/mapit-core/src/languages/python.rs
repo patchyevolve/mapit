@@ -42,10 +42,6 @@ impl LanguageAdapter for PythonAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Extractor
-// ---------------------------------------------------------------------------
-
 struct PythonExtractor<'a> {
     source: &'a str,
     output: AdapterOutput,
@@ -81,7 +77,6 @@ impl<'a> PythonExtractor<'a> {
                 if let Some(caller) = enclosing_fn {
                     self.handle_call(node, caller);
                 }
-                // recurse into arguments
                 if let Some(args) = node.child_by_field_name("arguments") {
                     let mut c = args.walk();
                     for child in args.children(&mut c) {
@@ -128,7 +123,6 @@ impl<'a> PythonExtractor<'a> {
             is_entry_point_candidate: is_entry,
         });
 
-        // Recurse into the function body
         if let Some(body) = node.child_by_field_name("body") {
             self.scope_stack.push(qualified.clone());
             let mut cursor = body.walk();
@@ -176,7 +170,6 @@ impl<'a> PythonExtractor<'a> {
     }
 
     fn handle_import(&mut self, node: Node) {
-        // `import foo`, `import foo, bar`
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "dotted_name" || child.kind() == "aliased_import" {
@@ -201,7 +194,6 @@ impl<'a> PythonExtractor<'a> {
     }
 
     fn handle_import_from(&mut self, node: Node) {
-        // `from foo import bar`
         let module = node
             .child_by_field_name("module_name")
             .map(|n| self.node_text(n))
@@ -245,10 +237,6 @@ impl<'a> PythonExtractor<'a> {
         });
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

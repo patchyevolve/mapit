@@ -5,10 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Node types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeType {
@@ -70,10 +66,6 @@ pub struct BaseNode {
     pub structural_hash: String,
     pub flaws: Vec<FlawFlag>,
 }
-
-// ---------------------------------------------------------------------------
-// Type-specific node variants (doc §1.1)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureNode {
@@ -187,10 +179,6 @@ impl Node {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Edges (doc §2)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeType {
@@ -224,10 +212,6 @@ pub struct Edge {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Flaw flags (doc §3)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -269,10 +253,6 @@ pub struct FlawFlag {
     pub related_node_ids: Option<Vec<String>>,
 }
 
-// ---------------------------------------------------------------------------
-// Control-flow graph (doc §5)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockKind {
@@ -311,10 +291,6 @@ pub struct ControlFlowGraph {
     pub blocks: Vec<ControlFlowBlock>,
 }
 
-// ---------------------------------------------------------------------------
-// Node ID derivation (doc §4)
-// ---------------------------------------------------------------------------
-
 use sha2::{Digest, Sha256};
 
 /// Compute a stable node ID: sha256(file_path + ":" + node_type + ":" + qualified_name)
@@ -341,10 +317,6 @@ pub fn compute_structural_hash(source: &str) -> String {
     let hash = Sha256::digest(source.as_bytes());
     hex::encode(&hash[..16])
 }
-
-// ---------------------------------------------------------------------------
-// Edge ID derivation
-// ---------------------------------------------------------------------------
 
 /// Compute a stable edge ID: sha256(from_id + to_id + edge_type + order_hint)
 pub fn compute_edge_id(

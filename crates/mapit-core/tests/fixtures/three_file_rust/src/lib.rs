@@ -1,4 +1,3 @@
-// Fixture: lib.rs — defines compute(), calls into utils::double()
 use crate::utils;
 
 pub fn compute(x: u32) -> u32 {

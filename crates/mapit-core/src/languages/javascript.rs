@@ -13,10 +13,6 @@ use super::{
     SymbolReference,
 };
 
-// ---------------------------------------------------------------------------
-// Adapter structs
-// ---------------------------------------------------------------------------
-
 pub struct JavaScriptAdapter;
 pub struct TypeScriptAdapter;
 
@@ -46,10 +42,6 @@ impl LanguageAdapter for TypeScriptAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared extraction logic
-// ---------------------------------------------------------------------------
-
 fn extract_with_grammar(lang: Language, relative_path: &str, source: &str) -> Result<AdapterOutput> {
     let mut parser = Parser::new();
     parser
@@ -70,10 +62,6 @@ fn extract_with_grammar(lang: Language, relative_path: &str, source: &str) -> Re
     extractor.visit_node(tree.root_node(), None);
     Ok(extractor.output)
 }
-
-// ---------------------------------------------------------------------------
-// Extractor
-// ---------------------------------------------------------------------------
 
 struct JsExtractor<'a> {
     source: &'a str,
@@ -250,7 +238,6 @@ impl<'a> JsExtractor<'a> {
             is_entry_point_candidate: is_entry,
         });
 
-        // Recurse into body
         // Arrow function: body may be an expression, not a block.
         // Collect child indices first to avoid borrow conflict with cursor.
         let body_node = node.child_by_field_name("body").or_else(|| {
@@ -281,7 +268,6 @@ impl<'a> JsExtractor<'a> {
     }
 
     fn handle_import(&mut self, node: Node) {
-        // `import ... from 'module'`
         if let Some(source_node) = node.child_by_field_name("source") {
             let raw = self.node_text(source_node);
             let target = raw.trim_matches(|c| c == '\'' || c == '"').to_owned();
@@ -334,7 +320,6 @@ impl<'a> JsExtractor<'a> {
     }
 
     fn handle_require(&mut self, node: Node) {
-        // `require('module')` — treat as an import
         if let Some(args) = node.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for child in args.children(&mut cursor) {
@@ -353,10 +338,6 @@ impl<'a> JsExtractor<'a> {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

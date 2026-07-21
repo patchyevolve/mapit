@@ -1,4 +1,3 @@
-// Fixture: main.rs — calls into lib.rs (cross-file call)
 mod lib;
 mod utils;
 

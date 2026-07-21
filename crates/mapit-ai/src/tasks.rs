@@ -525,50 +525,37 @@ mod tests {
     }
 
     #[test]
-    fn flag_flaws_parses_flaw_list() {
+    fn flag_flaws_batch_parses_flaw_list() {
         let provider = MockProvider {
-            response: r#"{"flaws": [{"kind": "dead_code", "severity": "warning", "description": "unused function", "confidence": 0.9, "basis": "structural+ai"}]}"#.into(),
+            response: r#"{"flaws": {"unused": [{"kind": "dead_code", "severity": "warning", "description": "unused function", "confidence": 0.9, "basis": "structural+ai"}]}}"#.into(),
         };
-        let result = flag_flaws(
+        let result = flag_flaws_batch(
             &provider,
             "test",
-            "unused",
             "src/lib.rs",
-            1,
-            1,
-            false,
-            false,
             "rust",
-            "fn unused() {}",
-            "fn unused()",
-            &[],
-            &[],
+            None,
+            &["--- Function: `unused` ---\nSource:\nfn unused() {}".to_string()],
         );
         assert!(result.is_ok());
         let output = result.unwrap();
-        assert_eq!(output.flaws.len(), 1);
-        assert_eq!(output.flaws[0].kind, "dead_code");
+        let all_flaws: Vec<&Flaw> = output.flaws.values().flatten().collect();
+        assert_eq!(all_flaws.len(), 1);
+        assert_eq!(all_flaws[0].kind, "dead_code");
     }
 
     #[test]
-    fn flag_flaws_returns_empty_when_no_flaws() {
+    fn flag_flaws_batch_returns_empty_when_no_flaws() {
         let provider = MockProvider {
-            response: r#"{"flaws": []}"#.into(),
+            response: r#"{"flaws": {}}"#.into(),
         };
-        let result = flag_flaws(
+        let result = flag_flaws_batch(
             &provider,
             "test",
-            "clean_fn",
             "src/lib.rs",
-            1,
-            1,
-            true,
-            false,
             "rust",
-            "fn clean_fn() {}",
-            "fn clean_fn()",
-            &[],
-            &[],
+            None,
+            &["--- Function: `clean_fn` ---\nSource:\nfn clean_fn() {}".to_string()],
         );
         assert!(result.is_ok());
         assert!(result.unwrap().flaws.is_empty());

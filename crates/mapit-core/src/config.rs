@@ -1,15 +1,10 @@
 //! Config file reading/writing — matches docs/05-backend-schema.md §1–4 exactly.
 //! Full implementation in Phase 4 when the CLI commands are wired up.
-//! This module defines the structs and stubs the I/O operations.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-// ---------------------------------------------------------------------------
-// Global config (~/.config/mapit/global_config.json)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
@@ -46,10 +41,6 @@ impl Default for GlobalConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Project-local config (<root>/.mapit/config.json)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub schema_version: u32,
@@ -73,11 +64,7 @@ impl Default for ProjectConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Credentials file (~/.config/mapit/credentials.json)
 // See docs/05-backend-schema.md §2.
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credentials {
     pub schema_version: u32,
@@ -125,10 +112,6 @@ pub fn save_credentials(config_dir: &Path, creds: &Credentials) -> Result<()> {
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// I/O helpers
-// ---------------------------------------------------------------------------
 
 pub fn load_global_config(config_dir: &Path) -> Result<GlobalConfig> {
     let path = config_dir.join("global_config.json");

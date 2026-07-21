@@ -36,23 +36,14 @@ impl GraphStore {
         Ok(store)
     }
 
-    // -----------------------------------------------------------------------
-    // Schema migrations
-    // -----------------------------------------------------------------------
-
     fn run_migrations(&self) -> Result<()> {
         self.conn.execute_batch(SCHEMA_V1)?;
-        // Track applied migration version to make future migrations safe.
         // PRAGMA user_version is a 32-bit integer stored in the database file.
         // SCHEMA_V1 already uses IF NOT EXISTS everywhere, making it idempotent.
         // Subsequent migration statements MUST be gated behind a version check.
         debug!("GraphStore schema initialized");
         Ok(())
     }
-
-    // -----------------------------------------------------------------------
-    // Node operations
-    // -----------------------------------------------------------------------
 
     /// Upsert a node (insert or replace by id).
     pub fn upsert_node(&self, node: &Node) -> Result<()> {
@@ -142,7 +133,6 @@ impl GraphStore {
         Ok(())
     }
 
-    /// Fetch a node by id. Returns None if not found.
     pub fn get_node(&self, id: &str) -> Result<Option<Node>> {
         let mut stmt = self.conn.prepare(
             "SELECT extra_json, has_incoming_calls, is_entry_point_candidate FROM nodes WHERE id = ?1",
@@ -170,7 +160,6 @@ impl GraphStore {
         Ok(None)
     }
 
-    /// Return all node ids for a given file_path.
     pub fn node_ids_for_file(&self, file_path: &str) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
@@ -181,17 +170,12 @@ impl GraphStore {
         Ok(ids)
     }
 
-    /// Count of all nodes.
     pub fn node_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))?;
         Ok(count as u64)
     }
-
-    // -----------------------------------------------------------------------
-    // Edge operations
-    // -----------------------------------------------------------------------
 
     /// Upsert an edge.
     pub fn upsert_edge(&self, edge: &Edge) -> Result<()> {
@@ -238,7 +222,6 @@ impl GraphStore {
         Ok(())
     }
 
-    /// Count of all edges.
     pub fn edge_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn
@@ -246,17 +229,14 @@ impl GraphStore {
         Ok(count as u64)
     }
 
-    /// Return all edges going out from a node.
     pub fn edges_from(&self, node_id: &str) -> Result<Vec<Edge>> {
         self.query_edges("SELECT * FROM edges WHERE from_id = ?1", node_id)
     }
 
-    /// Return all edges coming into a node.
     pub fn edges_to(&self, node_id: &str) -> Result<Vec<Edge>> {
         self.query_edges("SELECT * FROM edges WHERE to_id = ?1", node_id)
     }
 
-    /// Get a single edge by ID.
     pub fn get_edge(&self, edge_id: &str) -> Result<Option<Edge>> {
         let mut stmt = self.conn.prepare("SELECT * FROM edges WHERE id = ?1")?;
         let mut rows = stmt.query(params![edge_id])?;
@@ -279,10 +259,6 @@ impl GraphStore {
         }
         Ok(edges)
     }
-
-    // -----------------------------------------------------------------------
-    // Flaw operations
-    // -----------------------------------------------------------------------
 
     /// Upsert a flaw record.
     pub fn upsert_flaw(&self, flaw: &FlawFlag, primary_node_id: &str) -> Result<()> {
@@ -331,10 +307,6 @@ impl GraphStore {
         )?;
         Ok(())
     }
-
-    // -----------------------------------------------------------------------
-    // Manifest operations
-    // -----------------------------------------------------------------------
 
     pub fn upsert_manifest_entry(
         &self,
@@ -418,11 +390,6 @@ impl GraphStore {
         Ok(result)
     }
 
-    // -----------------------------------------------------------------------
-    // Query helpers
-    // -----------------------------------------------------------------------
-
-    /// Search nodes by name substring match.
     pub fn search_nodes_by_name(&self, query: &str) -> Result<Vec<Node>> {
         let escaped = query.replace('%', "~%").replace('_', "~_");
         let pattern = format!("%{}%", escaped);
@@ -451,7 +418,6 @@ impl GraphStore {
         Ok(results)
     }
 
-    /// Search nodes by name, file_path, or ai_summary (text search).
     pub fn search_nodes_by_text(&self, query: &str) -> Result<Vec<Node>> {
         let escaped = query.replace('%', "~%").replace('_', "~_");
         let pattern = format!("%{}%", escaped);
@@ -483,7 +449,6 @@ impl GraphStore {
         Ok(results)
     }
 
-    /// Get all nodes.
     pub fn get_all_nodes(&self) -> Result<Vec<Node>> {
         let mut stmt = self.conn.prepare(
             "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
@@ -520,7 +485,6 @@ impl GraphStore {
         Ok(results)
     }
 
-    /// Count of function nodes.
     pub fn function_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn
@@ -532,7 +496,6 @@ impl GraphStore {
         Ok(count as u64)
     }
 
-    /// Get distinct languages present in the graph.
     pub fn get_distinct_languages(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''",
@@ -556,7 +519,6 @@ impl GraphStore {
         Ok(count as u64)
     }
 
-    /// Return all flaws, optionally filtered by severity.
     /// Each result contains the FlawFlag + the primary node's name and file_path.
     pub fn query_flaws(
         &self,
@@ -642,7 +604,6 @@ impl GraphStore {
         Ok(results)
     }
 
-    /// Return flaws for a specific node.
     pub fn get_flaws_for_node(&self, node_id: &str) -> Result<Vec<FlawFlag>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, severity, description, confidence, basis, primary_node_id, related_node_ids_json
@@ -714,12 +675,10 @@ impl GraphStore {
     /// Update has_incoming_calls for all function nodes based on edge data.
     /// Called after a full graph build to set this structural fact correctly.
     pub fn recompute_incoming_calls(&self) -> Result<()> {
-        // Reset all to 0
         self.conn.execute(
             "UPDATE nodes SET has_incoming_calls = 0 WHERE type = 'function'",
             [],
         )?;
-        // Set 1 for those that have at least one incoming 'calls' edge
         self.conn.execute(
             "UPDATE nodes SET has_incoming_calls = 1
              WHERE type = 'function'
@@ -729,10 +688,6 @@ impl GraphStore {
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Row deserializer helpers
-// ---------------------------------------------------------------------------
 
 fn edge_from_row(row: &rusqlite::Row) -> Result<Edge> {
     use super::model::{EdgeConfidence, EdgeType};
@@ -779,10 +734,6 @@ fn ai_summary_status_str(status: &super::model::AiSummaryStatus) -> &'static str
         super::model::AiSummaryStatus::Unavailable => "unavailable",
     }
 }
-
-// ---------------------------------------------------------------------------
-// Schema DDL (matches doc 03 §6 exactly)
-// ---------------------------------------------------------------------------
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS nodes (
@@ -841,10 +792,6 @@ CREATE TABLE IF NOT EXISTS files_manifest (
   parse_error TEXT
 );
 ";
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
