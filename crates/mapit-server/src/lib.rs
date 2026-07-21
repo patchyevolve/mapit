@@ -1,3 +1,11 @@
+//! Web server backend for the mapit codebase mapper.
+//!
+//! Serves the embedded React frontend (via `rust-embed`) and exposes:
+//! - **REST API** (`/api/*`) — annotate, remap, graph queries, flaws, simulation
+//! - **WebSocket** (`/api/events`) — real-time progress updates for long-running tasks
+//!
+//! The server is started by `mapit-cli` after structural mapping completes.
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};

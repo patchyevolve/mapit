@@ -144,25 +144,25 @@ mapit/
 ### macOS / Linux (one-liner)
 
 ```bash
-curl -sfSL https://github.com/ORG/mapit/releases/latest/download/install.sh | sh
+curl -sfSL https://raw.githubusercontent.com/patchyevolve/mapit/main/install.sh | sh
 ```
 
 ### Homebrew
 
 ```bash
-brew install ORG/tap/mapit
+brew install patchyevolve/tap/mapit
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-powershell -c "irm https://github.com/ORG/mapit/releases/latest/download/install.ps1 | iex"
+powershell -c "irm https://github.com/patchyevolve/mapit/releases/latest/download/install.ps1 | iex"
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/ORG/mapit.git
+git clone https://github.com/patchyevolve/mapit.git
 cd mapit
 cargo build --release
 ./target/release/mapit
@@ -190,4 +190,4 @@ cd web/mapit-web && npm run dev
 
 ## License
 
-Proprietary — internal tool.
+MIT
