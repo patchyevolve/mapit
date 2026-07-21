@@ -303,6 +303,53 @@ impl<'a> CallVisitor<'a> {
         }
     }
 
+    fn extract_enclosing_condition(&self, mut node: Node) -> Option<String> {
+        loop {
+            node = node.parent()?;
+            match node.kind() {
+                "if_expression" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                    return None;
+                }
+                "match_arm" => {
+                    if let Some(pat) = node.child_by_field_name("pattern") {
+                        let text = self.node_text(pat).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("match arm: {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "while_expression" | "while_let_expression" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("while {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "for_expression" => {
+                    if let Some(pat) = node.child_by_field_name("pattern") {
+                        let p = self.node_text(pat).to_owned();
+                        if let Some(iter) = node.child_by_field_name("value") {
+                            let v = self.node_text(iter).to_owned();
+                            return Some(format!("for {p} in {v}"));
+                        }
+                    }
+                    return None;
+                }
+                "function_item" | "function_signature" => return None,
+                _ => continue,
+            }
+        }
+    }
+
     fn handle_call(&mut self, node: Node) {
         let func_node = match node.child_by_field_name("function") {
             Some(n) => n,
@@ -314,12 +361,14 @@ impl<'a> CallVisitor<'a> {
             return;
         }
 
+        let condition = self.extract_enclosing_condition(node);
+
         self.calls.push(SymbolReference {
             from_qualified_name: self.caller_qualified.to_owned(),
             called_name,
             call_line: node.start_position().row as u32 + 1,
             order_hint: self.order,
-            condition: None, // TODO Phase 3: extract branch condition context
+            condition,
         });
         self.order += 1;
     }
