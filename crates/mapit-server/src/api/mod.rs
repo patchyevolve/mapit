@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Instant;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -7,8 +12,6 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use crate::state::AppState;
@@ -24,15 +27,13 @@ use mapit_core::{
     graph::{
         builder::{self, FileInput, ParseResult},
         incremental::{diff_manifest, load_manifest, rebuild_manifest_from_store, save_manifest},
-        model::{self, AiSummaryStatus, FlawBasis, FlawFlag, FlawKind, FlawSeverity},
+        model::{self, AiSummaryStatus, EdgeType, FlawBasis, FlawFlag, FlawKind, FlawSeverity},
         store::GraphStore,
     },
     languages::adapter_for_language,
     walker,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::time::Instant;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -1068,7 +1069,7 @@ is_entry_point_candidate: {is_entry}
 Callers: {}
 Callees: {}
 Source code:
-```{lang}
+```{language}
 {src}
 ```"#,
                         base.name, callers.join(", "), callees.join(", "),
@@ -1258,20 +1259,230 @@ async fn simulate_handler(
         let provider = create_provider(&global_cfg, &project_cfg)?;
         let model = project_cfg.model_override.as_deref().unwrap_or(&global_cfg.default_model);
 
-        let overview = String::new();
-        let context = String::new();
+        let overview = get_project_overview(&store);
+        let context = build_sim_context(&store, &target, &name, &level)?;
 
-        anyhow::Ok(json!({
-            "status": "simulate_endpoint_active",
-            "name": name,
-            "level": level,
-        }))
+        match tasks::simulate(
+            provider.as_ref(),
+            model,
+            &level,
+            &name,
+            overview.as_deref(),
+            &context,
+        ) {
+            Ok(out) => anyhow::Ok(json!(out)),
+            Err(e) => anyhow::Ok(json!({"error": format!("simulate failed: {e}")})),
+        }
     }).await;
 
     match result {
         Ok(Ok(val)) => Ok(Json(val)),
         Ok(Err(e)) => Ok(Json(json!({"error": e.to_string()}))),
         Err(e) => Ok(Json(json!({"error": e.to_string()}))),
+    }
+}
+
+fn get_project_overview(store: &GraphStore) -> Option<String> {
+    let all = store.get_all_nodes().ok()?;
+    let first_file = all.iter().find(|n| n.base().node_type == model::NodeType::File)?;
+    first_file.base().ai_summary.clone()
+}
+
+fn build_sim_context(store: &GraphStore, target: &std::path::Path, name: &str, level: &str) -> anyhow::Result<String> {
+    match level {
+        "function" => build_function_context(store, target, name),
+        "file" => build_file_context(store, target, name),
+        "module" => build_module_context(store, target, name),
+        "project" => build_project_context(store),
+        _ => anyhow::bail!("Unknown level '{level}'. Use: function, file, module, or project."),
+    }
+}
+
+fn build_function_context(store: &GraphStore, target: &std::path::Path, name: &str) -> anyhow::Result<String> {
+    let nodes = store.search_nodes_by_name(name)?;
+    let node = nodes.iter().find(|n| n.base().name == name)
+        .or_else(|| nodes.first())
+        .ok_or_else(|| anyhow::anyhow!("No function found matching '{name}'"))?;
+    let base = node.base();
+    let signature = match node { Node::Function(f) => &f.signature, _ => "" };
+    let sl = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
+    let el = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
+    let language_s = base.language.as_deref().unwrap_or("");
+    let src = read_source_snippet(target, base.file_path.as_deref().unwrap_or(""), sl, el);
+    let callers = get_caller_names_with_summaries(store, &base.id);
+    let callees = get_callee_names_with_summaries(store, &base.id);
+    let summary = base.ai_summary.as_deref().unwrap_or("(no summary)");
+    Ok(format!(
+        r#"Type: function
+File: {fp}:{sl}-{el}
+Language: {language_s}
+Signature: {sig}
+Summary: {summary}
+Source code:
+```{language_s}
+{src}
+```
+Callers (with summaries):
+{callers}
+Callees (with summaries):
+{callees}"#,
+        fp = base.file_path.as_deref().unwrap_or("?"), sig = signature,
+    ))
+}
+
+fn build_file_context(store: &GraphStore, target: &std::path::Path, name: &str) -> anyhow::Result<String> {
+    let all = store.get_all_nodes()?;
+    let file_node = all.iter().find(|n| {
+        n.base().node_type == model::NodeType::File
+            && n.base().name == name
+    }).ok_or_else(|| anyhow::anyhow!("No file found matching '{name}'"))?;
+    let file_path = file_node.base().file_path.as_deref().unwrap_or("");
+    let language = file_node.base().language.as_deref().unwrap_or("");
+    let mut funcs: Vec<&Node> = all.iter()
+        .filter(|n| matches!(n, Node::Function(_)) && n.base().file_path.as_deref() == Some(file_path))
+        .collect();
+    funcs.sort_by_key(|n| n.base().span.as_ref().map(|s| s.start_line).unwrap_or(0));
+    let mut ctx = format!(
+        "Type: file\nFile: {file_path}\nLanguage: {language}\nFunctions in this file ({count}):\n",
+        count = funcs.len(),
+    );
+    for f in &funcs {
+        let b = f.base();
+        let sig = match f { Node::Function(g) => &g.signature, _ => "" };
+        let sl = b.span.as_ref().map(|s| s.start_line).unwrap_or(0);
+        let el = b.span.as_ref().map(|s| s.end_line).unwrap_or(0);
+        let s = b.ai_summary.as_deref().unwrap_or("(no summary)");
+        let callers = get_caller_names_with_summaries(store, &b.id);
+        let callees = get_callee_names_with_summaries(store, &b.id);
+        let src = read_source_snippet(target, file_path, sl, el);
+        ctx.push_str(&format!(
+            "\n--- {name} (line {sl}-{el}) ---\nSignature: {sig}\nSummary: {s}\nCallers: {callers}\nCallees: {callees}\nCode:\n```{language}\n{src}\n```\n",
+            name = b.name,
+        ));
+    }
+    Ok(ctx)
+}
+
+fn build_module_context(store: &GraphStore, _target: &std::path::Path, name: &str) -> anyhow::Result<String> {
+    let all = store.get_all_nodes()?;
+    let prefix = if name.ends_with('/') { name.to_owned() } else { format!("{name}/") };
+    let mut files: Vec<&Node> = all.iter()
+        .filter(|n| n.base().node_type == model::NodeType::File)
+        .filter(|n| n.base().file_path.as_deref().map_or(false, |fp| fp.starts_with(&prefix) || fp == name))
+        .collect();
+    files.sort_by_key(|n| n.base().name.clone());
+    let mut ctx = format!(
+        "Type: module (subfolder)\nModule path: {name}\nFiles in this module ({count}):\n",
+        count = files.len(),
+    );
+    for f in &files {
+        let fp = f.base().file_path.as_deref().unwrap_or("?");
+        let lang = f.base().language.as_deref().unwrap_or("");
+        let summary = f.base().ai_summary.as_deref().unwrap_or("(no file summary)");
+        ctx.push_str(&format!("\n  {fp} ({lang}): {summary}\n"));
+        let funcs: Vec<&Node> = all.iter()
+            .filter(|n| matches!(n, Node::Function(_)) && n.base().file_path.as_deref() == Some(fp))
+            .collect();
+        for func in &funcs {
+            let b = func.base();
+            let s = b.ai_summary.as_deref().unwrap_or("(no summary)");
+            ctx.push_str(&format!("    - {} (fn): {s}\n", b.name));
+        }
+    }
+    Ok(ctx)
+}
+
+fn build_project_context(store: &GraphStore) -> anyhow::Result<String> {
+    let all = store.get_all_nodes()?;
+    let files: Vec<&Node> = all.iter()
+        .filter(|n| n.base().node_type == model::NodeType::File)
+        .collect();
+    let funcs: Vec<&Node> = all.iter()
+        .filter(|n| matches!(n, Node::Function(_)))
+        .collect();
+    let entries: Vec<&Node> = funcs.iter()
+        .filter(|n| matches!(n, Node::Function(f) if f.is_entry_point_candidate && !f.has_incoming_calls))
+        .copied()
+        .collect();
+    let edges = store.get_all_edges().unwrap_or_default();
+    let call_edges = edges.iter().filter(|e| matches!(e.edge_type, EdgeType::Calls)).count();
+    let mut ctx = format!(
+        "Type: project\nFiles: {fc}\nFunctions: {fnc}\nCall-edges: {ec}\nEntry points: {epc}\nLanguages: {langs}\n",
+        fc = files.len(), fnc = funcs.len(), ec = call_edges, epc = entries.len(),
+        langs = store.get_distinct_languages().unwrap_or_default().join(", "),
+    );
+    ctx.push_str("\nEntry points:\n");
+    for e in &entries {
+        let b = e.base();
+        ctx.push_str(&format!("  {} ({})\n", b.name, b.file_path.as_deref().unwrap_or("?")));
+    }
+    ctx.push_str("\nFiles and their public functions:\n");
+    for f in &files {
+        let fp = f.base().file_path.as_deref().unwrap_or("?");
+        let lang = f.base().language.as_deref().unwrap_or("");
+        let summary = f.base().ai_summary.as_deref().unwrap_or("(no summary)");
+        ctx.push_str(&format!("\n  {fp} ({lang})\n    Overview: {summary}\n"));
+        let file_funcs: Vec<&Node> = funcs.iter()
+            .filter(|n| n.base().file_path.as_deref() == Some(fp))
+            .copied()
+            .collect();
+        for func in &file_funcs {
+            let b = func.base();
+            let s = b.ai_summary.as_deref().unwrap_or("(no summary)");
+            ctx.push_str(&format!("    - {}: {s}\n", b.name));
+        }
+    }
+    Ok(ctx)
+}
+
+fn get_caller_names_with_summaries(store: &GraphStore, node_id: &str) -> String {
+    match store.edges_to(node_id) {
+        Ok(edges) => {
+            let callers: Vec<String> = edges.iter()
+                .filter(|e| matches!(e.edge_type, EdgeType::Calls))
+                .filter_map(|e| {
+                    let node = store.get_node(&e.from_id).ok().flatten()?;
+                    let s = node.base().ai_summary.as_deref().unwrap_or("(no summary)");
+                    Some(format!("  - {}: {}", node.base().name, s))
+                })
+                .collect();
+            if callers.is_empty() { "(none)".into() } else { callers.join("\n") }
+        }
+        Err(_) => "(none)".into(),
+    }
+}
+
+fn get_callee_names_with_summaries(store: &GraphStore, node_id: &str) -> String {
+    match store.edges_from(node_id) {
+        Ok(edges) => {
+            let callees: Vec<String> = edges.iter()
+                .filter(|e| matches!(e.edge_type, EdgeType::Calls))
+                .filter_map(|e| {
+                    let node = store.get_node(&e.to_id).ok().flatten()?;
+                    let s = node.base().ai_summary.as_deref().unwrap_or("(no summary)");
+                    Some(format!("  - {}: {}", node.base().name, s))
+                })
+                .collect();
+            if callees.is_empty() { "(none)".into() } else { callees.join("\n") }
+        }
+        Err(_) => "(none)".into(),
+    }
+}
+
+fn read_source_snippet(project_root: &std::path::Path, file_path: &str, start_line: u32, end_line: u32) -> String {
+    if file_path.is_empty() || start_line == 0 || end_line == 0 {
+        return String::new();
+    }
+    let full_path = project_root.join(file_path);
+    match std::fs::read_to_string(&full_path) {
+        Ok(content) => {
+            let lines: Vec<&str> = content.lines().collect();
+            let start = (start_line.saturating_sub(1)) as usize;
+            let end = (end_line as usize).min(lines.len());
+            if start >= end { return String::new(); }
+            lines[start..end].join("\n")
+        }
+        Err(_) => String::new(),
     }
 }
 
@@ -1750,29 +1961,4 @@ fn get_callee_names(store: &GraphStore, node_id: &str) -> Vec<String> {
     }
 }
 
-fn read_source_snippet(
-    project_root: &std::path::Path,
-    file_path: &str,
-    start_line: u32,
-    end_line: u32,
-) -> String {
-    if file_path.is_empty() || start_line == 0 || end_line == 0 {
-        return String::new();
-    }
-    let full_path = project_root.join(file_path);
-    match std::fs::read_to_string(&full_path) {
-        Ok(content) => {
-            let lines: Vec<&str> = content.lines().collect();
-            let start = (start_line.saturating_sub(1)) as usize;
-            let end = (end_line as usize).min(lines.len());
-            if start >= end {
-                return String::new();
-            }
-            lines[start..end].join("\n")
-        }
-        Err(e) => {
-            warn!("Warning: could not read {}: {e}", full_path.display());
-            String::new()
-        }
-    }
-}
+

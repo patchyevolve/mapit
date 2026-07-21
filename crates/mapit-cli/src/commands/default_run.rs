@@ -54,6 +54,7 @@ fn show_help(port: u16) {
     println!("  │ \x1b[1mCommands\x1b[0m   http://127.0.0.1:{port}      │");
     println!("  ├─────────────────────────────────────────┤");
     println!("  │ \x1b[33mannotate\x1b[0m   Run AI enrichment        │");
+    println!("  │ \x1b[33msimulate <n>\x1b[0m AI text simulation      │");
     println!("  │ \x1b[33mremap\x1b[0m       Re-run structural mapping │");
     println!("  │ \x1b[33mstatus\x1b[0m      Show project stats       │");
     println!("  │ \x1b[33mflaws\x1b[0m       List AI-detected flaws   │");
@@ -145,6 +146,26 @@ async fn interactive_loop(port: u16) -> Result<()> {
                                     println!("  \x1b[31m{kind}\x1b[0m {name} — {desc}  (\x1b[2m{file}\x1b[0m)");
                                 }
                             }
+                        }
+                    }
+                    Err(e) => eprintln!("Error: {e}"),
+                }
+            }
+            cmd if cmd == "simulate" => {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 2 {
+                    println!("Usage: simulate <symbol> [--level function|file|module|project]");
+                    continue;
+                }
+                let name = parts[1..].iter().filter(|p| !p.starts_with("--")).copied().collect::<Vec<&str>>().join(" ");
+                let level = parts.iter().position(|p| *p == "--level")
+                    .and_then(|i| parts.get(i + 1).copied())
+                    .unwrap_or("function");
+                let payload = serde_json::json!({ "name": name, "level": level });
+                match client.post(format!("{}/api/simulate", base)).json(&payload).send().await {
+                    Ok(resp) => {
+                        if let Ok(body) = resp.json::<serde_json::Value>().await {
+                            println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
                         }
                     }
                     Err(e) => eprintln!("Error: {e}"),
