@@ -1,3 +1,4 @@
+use std::io::{BufRead, Write};
 use std::path::Path;
 use anyhow::{Context, Result};
 use mapit_core::config;
@@ -202,6 +203,23 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
 
     show_splash();
 
+    // Pre-check: does this directory have any supported source files?
+    let source_files = mapit_core::walker::walk(target, &[])?;
+    if source_files.is_empty() {
+        println!("\x1b[33m⚠ No supported source files found in this directory.\x1b[0m");
+        println!();
+        println!("  mapit currently supports: \x1b[36mRust, C, C++, Python, JavaScript/TypeScript, Assembly\x1b[0m");
+        println!();
+        println!("  \x1b[2mTip:\x1b[0m Run \x1b[33mmapit\x1b[0m inside a project directory with source code.");
+        println!("  \x1b[2mTip:\x1b[0m Use \x1b[33mmapit --path /path/to/project\x1b[0m to point at another directory.");
+        println!();
+        println!("  \x1b[2mNote:\x1b[0m Even without source files, you can still use the web UI to explore.");
+        if !prompt_yes_no("Continue anyway and start the web UI")? {
+            println!("Exiting.");
+            return Ok(());
+        }
+    }
+
     // Per App-Flow §1: on first run, trigger first-time setup
     if is_first_run || !global_config_path.exists() {
         if !global_config_path.exists() {
@@ -276,4 +294,12 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
     server_handle.abort();
     println!("\x1b[33mServer stopped. Goodbye!\x1b[0m");
     Ok(())
+}
+
+fn prompt_yes_no(prompt: &str) -> Result<bool> {
+    print!("{prompt} [y/N]: ");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input)?;
+    Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
 }

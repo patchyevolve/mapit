@@ -4,7 +4,7 @@
 set -euo pipefail
 
 APP="mapit"
-REPO="ORG/mapit"  # TODO: set to actual org/repo
+REPO="patchyevolve/mapit"
 
 die() {
   echo "error: $*" >&2
