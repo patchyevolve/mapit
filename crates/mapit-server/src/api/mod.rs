@@ -569,7 +569,7 @@ async fn remap_handler(
 
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&mapit_dir)?;
-        ensure_gitignore(&target)?;
+        mapit_core::config::ensure_gitignore(&target)?;
         let store = GraphStore::open(&db_path)?;
         let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
         let extra_ignores = project_cfg.extra_ignore_patterns.clone();
@@ -1895,17 +1895,6 @@ fn serialize_node(node: &Node) -> Value {
         Node::Module(_) | Node::TypeNode(_) | Node::Macro(_) | Node::Global(_) => {}
     }
     fields
-}
-
-fn ensure_gitignore(project_root: &std::path::Path) -> anyhow::Result<()> {
-    let mapit_gitignore = project_root.join(".mapit").join(".gitignore");
-    if !mapit_gitignore.exists() {
-        std::fs::write(
-            &mapit_gitignore,
-            "# mapit metadata directory — all contents auto-generated\n*\n",
-        )?;
-    }
-    Ok(())
 }
 
 fn create_provider(

@@ -63,6 +63,7 @@ fn show_help(port: u16) {
     println!("  │ \x1b[33mhelp\x1b[0m        Show this help           │");
     println!("  │ \x1b[33mexit\x1b[0m        Stop server and quit     │");
     println!("  └─────────────────────────────────────────┘");
+    println!("  \x1b[2mTip: remap --force to ignore cache\x1b[0m");
     println!();
 }
 

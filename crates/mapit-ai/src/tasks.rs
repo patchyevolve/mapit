@@ -212,46 +212,6 @@ pub fn summarize_file(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Task 3: Classify
-// ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-pub struct ClassifyOutput {
-    pub features: Vec<Feature>,
-}
-
-#[derive(Deserialize)]
-pub struct Feature {
-    pub name: String,
-    pub confidence: f64,
-    pub member_symbol_ids: Vec<String>,
-    pub member_file_ids: Vec<String>,
-}
-
-pub fn classify(
-    provider: &dyn AiProvider,
-    model: &str,
-    file_list: &str,
-    symbol_list: &str,
-    clustering_hints: &str,
-) -> Result<ClassifyOutput> {
-    let user_prompt = prompts::CLASSIFY
-        .replace("{{file_list}}", file_list)
-        .replace("{{symbol_list}}", symbol_list)
-        .replace("{{clustering_hints}}", clustering_hints);
-
-    let request = AiRequest {
-        model: model.to_owned(),
-        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
-        user_prompt,
-        expect_json: true,
-    };
-
-    let response = try_complete(provider, &request)?;
-    parse_json(&response.content)
-}
-
 #[derive(Deserialize)]
 pub struct Flaw {
     pub kind: String,

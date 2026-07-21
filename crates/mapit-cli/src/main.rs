@@ -1,5 +1,4 @@
-//! mapit CLI entry point (Phase 4 will wire all commands fully).
-//! For now: argument structure is defined, commands beyond `map` are stubs.
+//! mapit CLI entry point.
 
 mod commands;
 

@@ -1,5 +1,4 @@
-//! Config file reading/writing — matches docs/05-backend-schema.md §1–4 exactly.
-//! Full implementation in Phase 4 when the CLI commands are wired up.
+//! Config file reading/writing — global and project-local config, credentials.
 
 use std::path::{Path, PathBuf};
 
@@ -159,4 +158,12 @@ pub fn global_config_dir() -> PathBuf {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_owned());
     PathBuf::from(home).join(".config").join("mapit")
+}
+
+pub fn ensure_gitignore(project_root: &Path) -> Result<()> {
+    let mapit_gitignore = project_root.join(".mapit").join(".gitignore");
+    if !mapit_gitignore.exists() {
+        std::fs::write(&mapit_gitignore, "# mapit metadata directory — all contents auto-generated\n*\n")?;
+    }
+    Ok(())
 }

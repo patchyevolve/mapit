@@ -25,7 +25,7 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
     let mapit_dir = target.join(".mapit");
     std::fs::create_dir_all(&mapit_dir)?;
 
-    ensure_gitignore(target)?;
+    mapit_core::config::ensure_gitignore(target)?;
 
     let db_path = mapit_dir.join("graph.sqlite");
     let store = GraphStore::open(&db_path)?;
@@ -330,13 +330,3 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn ensure_gitignore(project_root: &Path) -> Result<()> {
-    // Write .gitignore inside .mapit/ instead of modifying user's root .gitignore.
-    // This achieves the same effect (git ignores .mapit's contents) without touching
-    // the user's source tree, per AGENTS.md "never write into source tree" rule.
-    let mapit_gitignore = project_root.join(".mapit").join(".gitignore");
-    if !mapit_gitignore.exists() {
-        std::fs::write(&mapit_gitignore, "# mapit metadata directory — all contents auto-generated\n*\n")?;
-    }
-    Ok(())
-}
