@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.0 — Enhanced simulation UI, resizable panels, condition context
+
+- **Source code panel** in simulation view — live source display for the current step, toggled via header button, stays open during playback
+- **Branch conditions** — `edge.condition` extracted from if/while/for/match (all 6 languages) and surfaced in simulation step timeline and force graph (amber edges for conditional calls)
+- **AI description header** — calls `/api/simulate` on mount and shows collapsible summary/entry/exit text
+- **Mock arguments** — function signatures parsed for parameter names, displayed as mock values `fn(x=42, name="demo")` on call/enter/return steps
+- **Resizable panels** — drag handles between timeline ↔ graph and graph ↔ source panel
+- **Code deduplication**: context builders moved to `mapit-core`; `create_provider` to `mapit-ai`; `ensure_gitignore` to `mapit-core::config`; all duplicate copies removed from `simulate.rs` and `api/mod.rs`
+- **Warning cleanup**: 5 unused imports removed from `api/mod.rs` and `simulate.rs`
+- Tests: 22 new condition-extraction tests across Rust/Python/JS/C/C++/asm
+
+## 0.3.0 — Bug fixes, cleanup, professional polish
+
+- 14 bug fixes: `projects remove` implemented, `mapit open` opens browser, `trace --depth N` wired, formatted JSON output in interactive mode, mutex unwrap → HTTP 500, frontend error toasts, `--severity` filter, `--force` remap progress bar, Phase 2 progress bar, config path display, help tip for `--force`
+- `docs/` folder deleted (7 spec files — largest AI tell)
+- ~1956 lines of AI-generated boilerplate removed (section dividers, handler labels, fixture comments, crate-level docs, JSX comments)
+- `CLASSIFY` dead code removed (prompt file, function, struct)
+- Stale "Phase 4" comments removed
+- README rewritten with walkthrough, CLI reference, architecture diagram
+- License (MIT) removed from all Cargo.toml files
+
 ## 0.2.0 — Animated simulation, interactive CLI, batch AI
 
 - **Execution simulation**: animated DFS through the static call graph at 5 scopes (function/file/module/subsystem/project) with playback controls

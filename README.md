@@ -30,6 +30,8 @@ On top of the graph, there are optional features that use an LLM (bring your own
 - **Flaw detection** — flags dead code, circular deps, suspicious patterns, missing error handling
 - **Text simulation** — describes the runtime flow of a function or the whole project
 
+The web UI adds an animated execution trace with source-code preview, branch-condition labels, mock argument values, and resizable panels — no LLM needed for the visual simulation layer.
+
 The web UI lets you explore the graph visually, and the interactive CLI lets you query things without leaving the terminal.
 
 ## Install
@@ -144,7 +146,7 @@ The web UI has a few sections:
 
 **System overview** — lists entry points (main functions, pub exports), groups files by directory into feature clusters, shows project-wide stats.
 
-**Simulation** — click "Simulate" on any function, file, or the whole project. You get an animated DFS traversal. In the browser it's visual; in the CLI via `mapit simulate` it's a text breakdown with steps, inputs, outputs, and error conditions.
+**Simulation** — click "Simulate" on any function, file, or the whole project. You get an animated DFS traversal with source-code panel, branch conditions, mock argument values, and an AI summary header. In the CLI via `mapit simulate` it's a text breakdown with steps, inputs, outputs, and error conditions. All panels are resizable with drag handles.
 
 **Settings** — configure your LLM endpoint and model from within the UI.
 
@@ -178,7 +180,7 @@ Language adapters are standalone per-language modules that implement a shared `L
 # Build everything
 cargo build --release
 
-# Run tests (125+ across all crates)
+# Run tests (147+ across all crates)
 cargo test --release
 
 # Frontend dev server (hot reload)
