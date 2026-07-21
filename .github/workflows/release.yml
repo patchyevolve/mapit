@@ -34,6 +34,14 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install npm dependencies
+        run: npm ci
+        working-directory: web/mapit-web
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --package mapit-cli
 
