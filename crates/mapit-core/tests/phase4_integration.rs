@@ -154,7 +154,7 @@ fn get_node_retrieves_expected_fields() {
             assert_eq!(f.base.name, "compute");
             assert!(f.is_entry_point_candidate, "pub fn compute should be entry pt");
             assert!(
-                !f.has_incoming_calls,
+                f.has_incoming_calls,
                 "compute is called by main (exact-resolved), so has_incoming_calls should be true"
             );
         }
@@ -172,7 +172,7 @@ fn explain_shows_callees_to_external_nodes() {
         .unwrap()
         .id();
 
-    // Callees: compute calls utils::double (cross-module → DynamicUnresolved to ExternalNode)
+    // Callees: compute calls utils::double (now resolved cross-module)
     let outgoing = store.edges_from(&compute_id).unwrap();
     let callee_ids: Vec<&str> = outgoing
         .iter()
@@ -193,22 +193,22 @@ fn explain_shows_callees_to_external_nodes() {
         "compute should call double, got: {}",
         callee.base().name
     );
-    // Cross-module calls are DynamicUnresolved → ExternalNode in v1
+    // Cross-module calls are now resolved via simple-name fallback
     assert!(
-        matches!(callee, Node::External(_)),
-        "cross-module callee should be ExternalNode"
+        matches!(callee, Node::Function(_)),
+        "cross-module callee should now be a FunctionNode (simple-name resolution)"
     );
 
-    // Callers: compute has NO resolved callers.
-    // main calls lib::compute (cross-module → DynamicUnresolved to ExternalNode)
+    // Callers: compute now has a resolved caller (main → lib::compute)
     let incoming = store.edges_to(&compute_id).unwrap();
     let caller_calls: Vec<_> = incoming
         .iter()
         .filter(|e| matches!(e.edge_type, EdgeType::Calls))
         .collect();
-    assert!(
-        caller_calls.is_empty(),
-        "compute should have no resolved callers (cross-module calls unresolved), got {}",
+    assert_eq!(
+        caller_calls.len(),
+        1,
+        "compute should have 1 resolved caller (main), got {}",
         caller_calls.len()
     );
 }
@@ -255,16 +255,26 @@ fn structural_flags_survive_round_trip() {
 
             match stored {
                 Node::Function(sf) => {
-                    assert_eq!(
-                        sf.has_incoming_calls, f.has_incoming_calls,
-                        "has_incoming_calls mismatch for {}: expected {}, got {}",
-                        f.base.name, f.has_incoming_calls, sf.has_incoming_calls
-                    );
+                    // is_entry_point_candidate must survive round-trip unchanged
                     assert_eq!(
                         sf.is_entry_point_candidate, f.is_entry_point_candidate,
                         "is_entry_point_candidate mismatch for {}: expected {}, got {}",
                         f.base.name, f.is_entry_point_candidate, sf.is_entry_point_candidate
                     );
+                    // has_incoming_calls may be updated by recompute_incoming_calls
+                    // (which runs during store population). Verify that if the stored
+                    // value says true, there's actually a corresponding Calls edge.
+                    if sf.has_incoming_calls {
+                        let incoming = store.edges_to(&sf.base.id).unwrap();
+                        let has_caller = incoming
+                            .iter()
+                            .any(|e| matches!(e.edge_type, EdgeType::Calls));
+                        assert!(
+                            has_caller,
+                            "has_incoming_calls=true for {} but no incoming Calls edge found",
+                            f.base.name
+                        );
+                    }
                 }
                 _ => panic!("expected FunctionNode for {}", f.base.name),
             }
@@ -338,12 +348,12 @@ fn edges_to_finds_defines_and_calls_for_file_nodes() {
         defines.len()
     );
 
-    // Test edges_to on the utils::double ExternalNode → should have Calls edge from compute
-    let utils_double = nodes
+    // Test edges_to on the double FunctionNode → should have Calls edge from compute
+    let double_fn = nodes
         .iter()
-        .find(|n| n.base().name == "utils::double")
-        .expect("utils::double ExternalNode must exist");
-    let calls_to = store.edges_to(&utils_double.id()).unwrap();
+        .find(|n| n.base().name == "double")
+        .expect("double FunctionNode must exist");
+    let calls_to = store.edges_to(&double_fn.id()).unwrap();
     let calls: Vec<_> = calls_to
         .iter()
         .filter(|e| matches!(e.edge_type, EdgeType::Calls))
@@ -351,7 +361,7 @@ fn edges_to_finds_defines_and_calls_for_file_nodes() {
     assert_eq!(
         calls.len(),
         1,
-        "utils::double should have exactly 1 caller (compute), got {}",
+        "double should have exactly 1 caller (compute), got {}",
         calls.len()
     );
     let caller_id = calls[0].from_id.as_str();
@@ -361,13 +371,13 @@ fn edges_to_finds_defines_and_calls_for_file_nodes() {
         .expect("caller must exist");
     assert_eq!(
         caller.base().name, "compute",
-        "caller of utils::double should be compute"
+        "caller of double should be compute"
     );
 
-    // Cross-module calls are DynamicUnresolved in v1
+    // Cross-module calls are now resolved via simple-name fallback → Probable
     assert!(
-        matches!(calls[0].confidence, EdgeConfidence::DynamicUnresolved),
-        "cross-module calls should be dynamic_unresolved (v1 limitation)"
+        matches!(calls[0].confidence, EdgeConfidence::Probable),
+        "cross-module calls should now be probable (resolved via simple-name)"
     );
 }
 

@@ -284,7 +284,10 @@ export function TraceView() {
     state.overlay?.kind === "trace_view" ? state.overlay.node_id : null;
 
   useEffect(() => {
-    if (!nodeId) return;
+    if (!nodeId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     api
       .trace(nodeId, 10)

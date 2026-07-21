@@ -47,9 +47,9 @@ export function Breadcrumb() {
         Overview
       </button>
       {crumbs.map((cr, i) => (
-        <span key={i} className="flex items-center gap-1">
+        <span key={`${cr.label}-${cr.node_id ?? i}`} className="flex items-center gap-1">
           <span className="mx-1">›</span>
-          {i < crumbs.length - 1 && cr.node_id ? (
+          {i < crumbs.length - 1 && cr.node_id != null ? (
             <button
               type="button"
               className="hover:text-mapit-accent transition-colors focus:ring-2 focus:ring-mapit-accent focus:outline-none rounded"

@@ -30,9 +30,9 @@ export function connectWs() {
   };
 
   ws.onclose = () => {
-    console.log("[ws] disconnected, reconnecting in 3s");
+    console.log("[ws] disconnected");
     ws = null;
-    setTimeout(connectWs, 3000);
+    if (listeners.size > 0) setTimeout(connectWs, 3000);
   };
 
   ws.onerror = () => {
@@ -42,5 +42,15 @@ export function connectWs() {
 
 export function onWsEvent(fn: Listener): () => void {
   listeners.add(fn);
-  return () => { listeners.delete(fn); };
+  return () => {
+    listeners.delete(fn);
+    if (listeners.size === 0) disconnectWs();
+  };
+}
+
+export function disconnectWs() {
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
 }

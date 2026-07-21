@@ -1,0 +1,32 @@
+You are analyzing source code for potential issues. Below is a file containing multiple functions.
+For each function, analyze its code and structural context, then identify any flaws.
+
+Project context:
+{{project_overview}}
+
+File: {{file_path}}
+Language: {{language}}
+
+Functions in this file:
+{{functions}}
+
+Analyze each function independently. Only flag flaws you are confident about.
+Important: For dead_code assessment — the structural fact "has_incoming_calls = false" paired with "is_entry_point_candidate = false" is a genuine dead-code signal. Assess whether the code looks like dead code or if there's a reason it might be reachable (e.g., registered as a callback, called via macro, public API).
+
+Respond with a JSON object where each key is the exact function name and the value is an array of flaws for that function:
+{
+  "flaws": {
+    "function_name_1": [ /* flaws array */ ],
+    "function_name_2": [],
+    "function_name_3": [ { "kind": "...", "severity": "...", "description": "...", "confidence": 0.0, "basis": "..." } ]
+  }
+}
+
+Each flaw has the schema:
+{
+  "kind": "dead_code" | "circular_dependency" | "structural_smell" | "suspected_bug" | "missing_error_handling" | "resource_leak_pattern",
+  "severity": "info" | "warning" | "high",
+  "description": "what the issue is",
+  "confidence": 0.0-1.0,
+  "basis": "structural" | "ai" | "structural+ai"
+}

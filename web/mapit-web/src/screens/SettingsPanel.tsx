@@ -232,6 +232,20 @@ export function SettingsPanel() {
   // ── Test chat ──
   const handleTestChat = async () => {
     if (!testMsg.trim()) return;
+    // Save current settings first so the server uses latest values
+    try {
+      const saved = await saveSettings();
+      if (!saved) {
+        setChatTesting(false);
+        return;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to save settings";
+      setChatResult({ ok: false, error: msg });
+      push(msg, "error", 6000);
+      setChatTesting(false);
+      return;
+    }
     setChatTesting(true);
     setChatResult(null);
     try {

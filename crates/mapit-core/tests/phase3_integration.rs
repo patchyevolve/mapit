@@ -44,10 +44,11 @@ const FIXTURES: &[FixtureFile] = &[
     },
 ];
 
-/// Compute a fake content hash by hex-encoding the length.
-/// Not cryptographic, but consistent for diffing.
+/// Compute a SHA-256 content hash for incremental diffing.
 fn content_hash(source: &str) -> String {
-    format!("sha256:{:x}", source.len())
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(source.as_bytes());
+    format!("sha256:{}", hex::encode(&hash[..16]))
 }
 
 // ---------------------------------------------------------------------------

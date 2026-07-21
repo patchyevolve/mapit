@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { AppCtx, appReducer, initialState } from "./store";
 import { connectWs, onWsEvent } from "./ws-client";
 import { api } from "./api-client";
@@ -19,6 +19,7 @@ import { SimulationView } from "./screens/SimulationView";
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   /* ─── Load initial data ─── */
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function App() {
             current: event.current,
             total: event.total,
             currentFile: event.current_file,
+            currentSymbol: event.current_symbol,
           };
 
           // We dispatch both — the reducer decides which matters based on current screen.
@@ -83,11 +85,14 @@ export default function App() {
             current: event.current,
             total: event.total,
             currentFile: event.current_file,
+            currentSymbol: event.current_symbol,
           });
           break;
         }
 
         case "map_phase_complete": {
+          const done = event.total ?? 0;
+
           if (event.phase === "structural") {
             // Clear full-screen progress (only relevant during initial load)
             dispatch({ type: "SET_MAP_PROGRESS", progress: null });
@@ -96,8 +101,8 @@ export default function App() {
             // Mark bg progress as complete (will auto-dismiss or let user close)
             dispatch({
               type: "TICK_BG_PROGRESS",
-              current: 999999,
-              total: 999999,
+              current: done,
+              total: done,
               currentFile: undefined,
             });
           } else if (event.phase === "ai_enrichment") {
@@ -106,8 +111,8 @@ export default function App() {
             // Mark complete, then refresh project stats + flaws after a brief delay
             dispatch({
               type: "TICK_BG_PROGRESS",
-              current: 999999,
-              total: 999999,
+              current: done,
+              total: done,
               currentFile: undefined,
             });
             setTimeout(() => {
@@ -125,12 +130,18 @@ export default function App() {
         case "node_updated":
           api.node(event.node_id).then((node) => {
             dispatch({ type: "UPSERT_NODE", node });
-          });
+          }).catch(console.error);
           break;
 
-        case "error":
+        case "error": {
           console.error("[ws error]", event.message);
+          const errMsg = `⚠ ${event.message}`;
+          setErrorToast(errMsg);
+          setTimeout(() => setErrorToast(null), 8000);
+          // Clear background progress so user sees the error
+          dispatch({ type: "SET_BG_PROGRESS", progress: null });
           break;
+        }
       }
     });
 
@@ -201,7 +212,12 @@ export default function App() {
           </div>
         )}
 
-        {state.overlay?.kind === "simulation" && (
+        {(state.overlay?.kind === "simulation"
+          || state.overlay?.kind === "file_simulation"
+          || state.overlay?.kind === "module_simulation"
+          || state.overlay?.kind === "feature_simulation"
+          || state.overlay?.kind === "project_simulation"
+        ) && (
           <div className="absolute inset-0 z-40 bg-mapit-bg pointer-events-auto">
             <SimulationView />
           </div>
@@ -209,6 +225,23 @@ export default function App() {
 
         {/* Background progress bar — bottom-right corner, non-blocking */}
         {showBgProgress && <BgProgressBar />}
+
+        {/* Error toast — shown when AI provider fails */}
+        {errorToast && (
+          <div className="fixed bottom-20 right-4 z-50 max-w-md bg-mapit-danger/10 border border-mapit-danger/40 text-mapit-danger px-4 py-3 rounded-xl shadow-2xl text-sm">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 shrink-0">⚠️</span>
+              <span className="break-words">{errorToast}</span>
+              <button
+                type="button"
+                onClick={() => setErrorToast(null)}
+                className="ml-2 shrink-0 text-mapit-danger/60 hover:text-mapit-danger transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </AppCtx.Provider>
   );

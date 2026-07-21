@@ -251,11 +251,13 @@ export interface WsMapProgress {
   current: number;
   total: number;
   current_file?: string;
+  current_symbol?: string;
 }
 
 export interface WsMapPhaseComplete {
   event: "map_phase_complete";
   phase: "structural" | "ai_enrichment";
+  total?: number;
 }
 
 export interface WsNodeUpdated {
@@ -295,7 +297,11 @@ export type Overlay =
   | { kind: "trace_view"; node_id: string }
   | { kind: "neighbors"; node_id: string }
   | { kind: "external_detail"; node_id: string }
-  | { kind: "simulation"; node_id: string }
+  | { kind: "simulation"; node_id: string; }
+  | { kind: "file_simulation"; file_path: string; title: string }
+  | { kind: "module_simulation"; path: string; title: string }
+  | { kind: "feature_simulation"; node_id: string; title: string }
+  | { kind: "project_simulation" }
   | { kind: "ask" }
   | null;
 
@@ -304,6 +310,7 @@ export interface ProgressState {
   current: number;
   total: number;
   currentFile?: string;
+  currentSymbol?: string;
   /** Human label shown in the progress bar */
   label: string;
 }

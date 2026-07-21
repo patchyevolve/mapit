@@ -3,6 +3,9 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      animation: {
+        indeterminate: 'indeterminate 1.4s ease-in-out infinite',
+      },
       colors: {
         mapit: {
           bg: '#0b0d12',

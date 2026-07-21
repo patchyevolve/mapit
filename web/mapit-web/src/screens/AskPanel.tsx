@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../api-client";
 import { useAppState } from "../store";
 import type { GroundingStatus } from "../types";
@@ -46,7 +46,10 @@ export function AskPanel() {
   const [q, setQ] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const active = useRef(true);
   const { state, dispatch } = useAppState();
+
+  useEffect(() => () => { active.current = false; }, []);
 
   const handleAsk = async () => {
     if (!q.trim()) return;
@@ -55,6 +58,7 @@ export function AskPanel() {
     setLoading(true);
     try {
       const res = await api.ask({ question });
+      if (!active.current) return;
       setHistory((prev) => [
         ...prev,
         {
@@ -65,6 +69,7 @@ export function AskPanel() {
         },
       ]);
     } catch (e: unknown) {
+      if (!active.current) return;
       setHistory((prev) => [
         ...prev,
         {
@@ -75,7 +80,7 @@ export function AskPanel() {
         },
       ]);
     } finally {
-      setLoading(false);
+      if (active.current) setLoading(false);
     }
   };
 

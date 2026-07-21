@@ -35,6 +35,7 @@ export type AppAction =
       current: number;
       total: number;
       currentFile?: string;
+      currentSymbol?: string;
     };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -78,6 +79,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           current: action.current,
           total: action.total > 0 ? action.total : state.bgProgress.total,
           currentFile: action.currentFile,
+          currentSymbol: action.currentSymbol,
         },
       };
     default:

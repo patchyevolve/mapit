@@ -11,6 +11,7 @@
 # Node / web build artifacts
 web/mapit-web/node_modules/
 web/mapit-web/dist/
+crates/mapit-server/embedded_dist/
 
 # Editor / OS
 .DS_Store

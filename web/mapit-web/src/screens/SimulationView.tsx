@@ -12,6 +12,7 @@ import type { Node, Edge } from "../types";
 // ─── Step model ────────────────────────────────────────────────────────────────
 
 type StepKind = "enter" | "call" | "return" | "cycle" | "maxdepth" | "external";
+type SimScope = "function" | "file" | "module" | "project";
 
 interface SimStep {
   id:            number;
@@ -21,31 +22,29 @@ interface SimStep {
   filePath?:     string;
   startLine?:    number;
   depth:         number;
-  /** For "call" steps — who is being called */
   calleeNodeId?: string;
   calleeName?:   string;
 }
 
 interface SimState {
-  callStack:    string[];      // IDs of frames currently open
-  activeNodeId: string | null; // top of stack
-  visitedIds:   Set<string>;   // entered at least once
-  completedIds: Set<string>;   // returned from
+  callStack:    string[];
+  activeNodeId: string | null;
+  visitedIds:   Set<string>;
+  completedIds: Set<string>;
 }
 
-// ─── Step generation (DFS over static call graph) ─────────────────────────────
+// ─── Step generation (DFS over static call graph, multiple roots) ─────────────
 
 function generateSteps(
-  rootId:   string,
+  rootIds:  string[],
   allNodes: Map<string, Node>,
   allEdges: Edge[],
   maxDepth: number,
-  maxSteps = 600,
+  maxSteps = 700,
 ): SimStep[] {
   const steps: SimStep[] = [];
   let nextId = 0;
 
-  // build callee map
   const calleeMap = new Map<string, string[]>();
   allEdges.forEach((e) => {
     if (e.type === "calls") {
@@ -100,7 +99,9 @@ function generateSteps(
     push({ kind: "return", nodeId, nodeName, filePath, startLine, depth });
   }
 
-  dfs(rootId, 0, new Set());
+  for (const rootId of rootIds) {
+    dfs(rootId, 0, new Set());
+  }
   return steps;
 }
 
@@ -131,46 +132,6 @@ function computeSimState(steps: SimStep[], upTo: number): SimState {
     visitedIds,
     completedIds,
   };
-}
-
-// ─── Collect reachable subgraph up to maxDepth ────────────────────────────────
-
-function getReachable(
-  rootId:   string,
-  allNodes: Map<string, Node>,
-  allEdges: Edge[],
-  maxDepth: number,
-): { nodes: Node[]; edges: Edge[] } {
-  const calleeMap = new Map<string, string[]>();
-  allEdges.forEach((e) => {
-    if (e.type === "calls") {
-      const list = calleeMap.get(e.from_id) ?? [];
-      list.push(e.to_id);
-      calleeMap.set(e.from_id, list);
-    }
-  });
-
-  const reachable = new Set<string>();
-  const queue: [string, number][] = [[rootId, 0]];
-  while (queue.length > 0) {
-    const [id, d] = queue.shift()!;
-    if (reachable.has(id) || d > maxDepth) continue;
-    reachable.add(id);
-    (calleeMap.get(id) ?? []).forEach((c) => queue.push([c, d + 1]));
-  }
-
-  const nodes = [...reachable]
-    .map((id) => allNodes.get(id))
-    .filter(Boolean) as Node[];
-
-  const edges = allEdges.filter(
-    (e) =>
-      e.type === "calls" &&
-      reachable.has(e.from_id) &&
-      reachable.has(e.to_id),
-  );
-
-  return { nodes, edges };
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -207,8 +168,78 @@ const COLOR = {
 export function SimulationView() {
   const { state, dispatch } = useAppState();
 
-  const nodeId   = state.overlay?.kind === "simulation" ? state.overlay.node_id : null;
-  const rootNode = nodeId ? state.allNodes.get(nodeId) : undefined;
+  // ── Determine root IDs from overlay scope (memoized) ──
+  const overlay   = state.overlay;
+  const scopeInfo = useMemo(() => {
+    if (overlay?.kind === "simulation") {
+      const nid = overlay.node_id;
+      return {
+        scope: "function" as SimScope,
+        rootIds: [nid],
+        title: state.allNodes.get(nid)?.name ?? nid.slice(0, 12),
+        color: "#5b8def",
+      };
+    }
+    if (overlay?.kind === "file_simulation") {
+      const ids = [...state.allNodes.values()]
+        .filter((n) => n.type === "function" && n.file_path === overlay.file_path)
+        .map((n) => n.id);
+      return {
+        scope: "file" as SimScope,
+        rootIds: ids,
+        title: overlay.title,
+        color: "#3ecf8e",
+      };
+    }
+    if (overlay?.kind === "module_simulation") {
+      const ids = [...state.allNodes.values()]
+        .filter((n) => n.type === "function" && n.file_path?.startsWith(overlay.path))
+        .map((n) => n.id);
+      return {
+        scope: "module" as SimScope,
+        rootIds: ids,
+        title: overlay.title,
+        color: "#e0a440",
+      };
+    }
+    if (overlay?.kind === "feature_simulation") {
+      const feat = state.allNodes.get(overlay.node_id);
+      const members: string[] = feat?.type === "feature" ? (feat as any).member_node_ids ?? [] : [];
+      const memberFiles = members
+        .map((id: string): Node | undefined => state.allNodes.get(id))
+        .filter((n): n is Node => !!n && n.type === "file");
+      const memberPaths = new Set(memberFiles.map((f: Node): string | undefined => f.file_path).filter(Boolean));
+      const ids = [...state.allNodes.values()]
+        .filter((n: Node): boolean => n.type === "function" && !!n.file_path && memberPaths.has(n.file_path))
+        .map((n: Node): string => n.id);
+      return {
+        scope: "module" as SimScope,
+        rootIds: ids,
+        title: overlay.title,
+        color: "#d05bce",
+      };
+    }
+    if (overlay?.kind === "project_simulation") {
+      const candidates = [...state.allNodes.values()]
+        .filter((n) => n.type === "function" && (n as any).is_entry_point_candidate)
+        .map((n) => n.id);
+      const ids = candidates.length > 0
+        ? candidates
+        : [...state.allNodes.values()]
+            .filter((n) => n.type === "function" && n.file_path)
+            .map((n) => n.id);
+      return {
+        scope: "project" as SimScope,
+        rootIds: ids,
+        title: "Project (all entry points)",
+        color: "#d05bce",
+      };
+    }
+    return null;
+  }, [overlay, state.allNodes]);
+
+  const rootIds   = scopeInfo?.rootIds ?? [];
+  const scopeKind = scopeInfo?.scope ?? "function";
 
   const [maxDepth,  setMaxDepth]  = useState(4);
   const [stepIdx,   setStepIdx]   = useState(0);
@@ -232,17 +263,51 @@ export function SimulationView() {
     return () => obs.disconnect();
   }, []);
 
+  // ── Dynamic max steps based on scope ──
+  const maxSteps = useMemo(() => {
+    const n = state.allNodes.size;
+    const r = rootIds.length;
+    if (r <= 1) return 600;
+    if (r <= 10) return 2000;
+    return Math.min(n * 4, 10000);
+  }, [rootIds.length, state.allNodes.size]);
+
   // ── Pre-compute steps when root / depth changes ──
   const steps = useMemo(() => {
-    if (!nodeId) return [];
-    return generateSteps(nodeId, state.allNodes, state.allEdges, maxDepth, 700);
-  }, [nodeId, state.allNodes, state.allEdges, maxDepth]);
+    if (rootIds.length === 0) return [];
+    return generateSteps(rootIds, state.allNodes, state.allEdges, maxDepth, maxSteps);
+  }, [rootIds, state.allNodes, state.allEdges, maxDepth, maxSteps]);
 
   // ── Reachable subgraph for graph panel ──
   const { nodes: graphNodes, edges: graphEdges } = useMemo(() => {
-    if (!nodeId) return { nodes: [], edges: [] };
-    return getReachable(nodeId, state.allNodes, state.allEdges, maxDepth);
-  }, [nodeId, state.allNodes, state.allEdges, maxDepth]);
+    if (rootIds.length === 0) return { nodes: [], edges: [] };
+    // union reachable from all roots
+    const reachable = new Set<string>();
+    const calleeMap = new Map<string, string[]>();
+    state.allEdges.forEach((e) => {
+      if (e.type === "calls") {
+        const list = calleeMap.get(e.from_id) ?? [];
+        list.push(e.to_id);
+        calleeMap.set(e.from_id, list);
+      }
+    });
+    for (const rid of rootIds) {
+      const queue: [string, number][] = [[rid, 0]];
+      while (queue.length > 0) {
+        const [id, d] = queue.shift()!;
+        if (reachable.has(id) || d > maxDepth) continue;
+        reachable.add(id);
+        (calleeMap.get(id) ?? []).forEach((c) => queue.push([c, d + 1]));
+      }
+    }
+    const nodes = [...reachable]
+      .map((id) => state.allNodes.get(id))
+      .filter(Boolean) as Node[];
+    const edges = state.allEdges.filter(
+      (e) => e.type === "calls" && reachable.has(e.from_id) && reachable.has(e.to_id),
+    );
+    return { nodes, edges };
+  }, [rootIds, state.allNodes, state.allEdges, maxDepth]);
 
   // ── Simulation state at current step ──
   const simState = useMemo(
@@ -281,6 +346,7 @@ export function SimulationView() {
   }, [stepIdx]);
 
   // ── Graph data ──
+  const rootSet = useMemo(() => new Set(rootIds), [rootIds]);
   const graphData = useMemo(() => {
     const nodeSet = new Set(graphNodes.map((n) => n.id));
     return {
@@ -288,14 +354,14 @@ export function SimulationView() {
         id:       n.id,
         name:     n.name,
         filePath: n.file_path,
-        isRoot:   n.id === nodeId,
-        val:      n.id === nodeId ? 9 : 5,
+        isRoot:   rootSet.has(n.id),
+        val:      rootSet.has(n.id) ? 9 : 5,
       })),
       links: graphEdges
         .filter((e) => nodeSet.has(e.from_id) && nodeSet.has(e.to_id))
         .map((e) => ({ id: e.id, source: e.from_id, target: e.to_id })),
     };
-  }, [graphNodes, graphEdges, nodeId]);
+  }, [graphNodes, graphEdges, rootSet]);
 
   // ── Node colour ──
   const nodeColor = useCallback(
@@ -399,7 +465,7 @@ export function SimulationView() {
     [simState],
   );
 
-  if (!nodeId || !rootNode) return null;
+  if (rootIds.length === 0) return null;
 
   return (
     <div className="flex flex-col h-full bg-mapit-bg">
@@ -409,18 +475,16 @@ export function SimulationView() {
           <button
             type="button"
             className="flex-shrink-0 text-mapit-muted hover:text-mapit-text text-sm focus:ring-2 focus:ring-mapit-accent focus:outline-none rounded"
-            onClick={() =>
-              dispatch({ type: "SET_OVERLAY", overlay: { kind: "function_detail", node_id: nodeId } })
-            }
+            onClick={() => dispatch({ type: "SET_OVERLAY", overlay: null })}
           >
             ← Back
           </button>
           <span className="text-sm font-semibold text-mapit-text truncate">
-            🎬 Simulate:{" "}
-            <span className="font-mono">{rootNode.name}</span>
+            🎬 <span className="uppercase text-[10px] tracking-widest text-mapit-muted mr-1">{scopeKind}</span>
+            {scopeInfo?.title}
           </span>
           <span className="flex-shrink-0 text-xs text-mapit-muted bg-mapit-surface2 border border-mapit-border rounded px-2 py-0.5">
-            {steps.length} steps · {graphNodes.length} fns
+            {steps.length} steps · {graphNodes.length} fns · {scopeInfo?.rootIds.length} root{scopeInfo && scopeInfo.rootIds.length !== 1 ? "s" : ""}
           </span>
         </div>
 

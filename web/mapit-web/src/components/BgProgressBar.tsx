@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAppState } from "../store";
+import { api } from "../api-client";
 import type { ProgressState } from "../types";
 
 // ─── Phase metadata ────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ export function BgProgressBar() {
         <div className={`w-full h-2 rounded-full overflow-hidden ${meta.trackColor}`}>
           {isIndeterminate ? (
             /* Indeterminate — animated shimmer */
-            <div className={`h-full w-1/3 ${meta.color} rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]`} />
+            <div className={`h-full w-1/3 ${meta.color} rounded-full animate-indeterminate`} />
           ) : (
             <div
               className={`h-full ${meta.color} rounded-full transition-all duration-500 ease-out`}
@@ -115,13 +116,13 @@ export function BgProgressBar() {
       {/* Stats row */}
       <div className="flex items-center justify-between px-4 py-2">
         <span className="text-xs text-mapit-muted truncate max-w-[200px]" title={bg.currentFile}>
-          {bg.currentFile
+          {bg.currentSymbol || (bg.currentFile
             ? bg.currentFile.split("/").slice(-1)[0]
             : isDone
               ? "Complete"
               : bg.phase === "structural"
                 ? "Parsing source files…"
-                : "Summarising symbols…"}
+                : "Summarising symbols…")}
         </span>
         {!isIndeterminate && (
           <div className="flex items-center gap-2 flex-shrink-0 ml-2">
@@ -134,14 +135,37 @@ export function BgProgressBar() {
           </div>
         )}
       </div>
+      {/* File name when showing symbol */}
+      {bg.currentSymbol && bg.currentFile && (
+        <div className="px-4 pb-1 -mt-1">
+          <span className="text-[11px] text-mapit-muted/60 truncate block" title={bg.currentFile}>
+            {bg.currentFile.split("/").slice(-1)[0]}
+          </span>
+        </div>
+      )}
 
-      {/* Phase sub-label */}
-      <div className="px-4 pb-3">
+      {/* Phase sub-label + cancel */}
+      <div className="flex items-center justify-between px-4 pb-3">
         <span className={`text-xs font-medium ${
           bg.phase === "ai_enrichment" ? "text-mapit-success" : "text-mapit-accent"
         }`}>
           {bg.phase === "structural" ? "Structural mapping" : "AI enrichment"}
         </span>
+        {!isDone && bg.phase === "ai_enrichment" && (
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await api.cancelAnnotate();
+              } catch (e) {
+                console.error("Cancel annotation failed:", e);
+              }
+            }}
+            className="text-xs font-medium text-mapit-danger hover:text-mapit-danger/80 transition-colors focus:outline-none"
+          >
+            Stop
+          </button>
+        )}
       </div>
     </div>
   );

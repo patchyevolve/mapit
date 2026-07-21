@@ -98,21 +98,46 @@ export function FlawsReport() {
       <div className="flex items-center justify-between px-4 py-2 bg-mapit-surface border-b border-mapit-border">
         <h2 className="text-sm font-semibold text-mapit-text">
           Flaws &amp; Issues
+          <span className="text-mapit-muted font-normal ml-1">
+            ({state.flaws.length})
+          </span>
           {displayed.length !== state.flaws.length && (
             <span className="text-mapit-muted font-normal ml-1">
-              ({displayed.length} / {state.flaws.length})
+              / showing {displayed.length}
             </span>
           )}
         </h2>
-        <button
-          type="button"
-          className="text-mapit-muted hover:text-mapit-text focus:ring-2 focus:ring-mapit-accent focus:outline-none rounded px-2 py-1 text-xs"
-          onClick={() =>
-            dispatch({ type: "SET_SCREEN", screen: "system_overview" })
-          }
-        >
-          ← Back to graph
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const text = state.flaws
+                .map(
+                  (f) =>
+                    `[${f.severity.toUpperCase()}] ${f.kind.replace(/_/g, " ")} — ${f.description}\n    File: ${f.file_path} — ${f.primary_node_name} (${(f.confidence * 100).toFixed(0)}% confidence, ${f.basis})`,
+                )
+                .join("\n\n");
+              navigator.clipboard.writeText(text).catch(console.error);
+            }}
+            className="flex items-center gap-1 text-mapit-muted hover:text-mapit-text focus:ring-2 focus:ring-mapit-accent focus:outline-none rounded px-2 py-1 text-xs transition-colors"
+            title="Copy all flaws as text"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Copy
+          </button>
+          <button
+            type="button"
+            className="text-mapit-muted hover:text-mapit-text focus:ring-2 focus:ring-mapit-accent focus:outline-none rounded px-2 py-1 text-xs"
+            onClick={() =>
+              dispatch({ type: "SET_SCREEN", screen: "system_overview" })
+            }
+          >
+            ← Back to graph
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

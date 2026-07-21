@@ -1,8 +1,174 @@
 # mapit — AI-Powered Interactive Codebase Mapper
 
-Run `mapit` inside any project folder. It parses the entire codebase (tree-sitter, not AI-hallucinated), builds a true call/dependency graph and execution-order model, and shows it as an interactive 3D web graph.
+```
+                    __  __    _    ____ ___ ___
+                   |  \/  |  / \  |  _ \_ _/ _ \
+                   | |\/| | / _ \ | |_) | | | | |
+                   | |  | |/ ___ \|  __/| | |_| |
+                   |_|  |_/_/   \_\_|  |___\___/
+```
+
+Run `mapit` inside any project folder. It parses the entire codebase using tree-sitter (deterministic, AI-free parsing), builds a true call/dependency graph with execution-order models, and serves an interactive web UI.
 
 ## Quick start
+
+```bash
+# Run in any project directory:
+mapit
+```
+
+On first run, `mapit` shows a splash screen, prompts for AI provider setup (can skip), runs structural mapping, opens the web browser, and drops you into an interactive CLI prompt connected to the running server.
+
+Structural mapping (files, symbols, call edges) works **without any AI provider**.
+
+## Features
+
+### 🗺 Structural mapping
+- Parses source files with tree-sitter (Rust, C, C++, assembly, Python, JavaScript/TypeScript)
+- Builds a complete call graph, include graph, define/reference edges
+- Incremental re-mapping — only re-parses changed files
+- Control-flow extraction per function (blocks, branches, loops)
+
+### 🤖 AI enrichment
+- Batch summarization by file (1 AI call per file, not per function → 11× fewer calls)
+- Cross-file context: caller summaries injected into each batch prompt, callee-first ordering
+- Project overview phase: single AI call describing the whole system before per-file work
+- Flaw detection (dead code, circular deps, structural smells, suspected bugs, etc.)
+- Structural dead-code gate: AI never flags dead code without `has_incoming_calls == false`
+- Skip AI entirely with `mapit annotate --no-flaws`
+
+### 🎬 Execution simulation
+Animated DFS through the static call graph — no AI involved, purely structural:
+
+| Scope | Where to trigger | What it does |
+|---|---|---|
+| **Function** | Function Detail panel → "Simulate execution from here" | DFS from one function |
+| **File** | File view header → "Simulate file" | DFS from every function in that file |
+| **Subsystem** | Feature/subsystem view → "Simulate subsystem" | DFS from every function in a feature group |
+| **Module** | File browser directory header → "Simulate" | DFS from every function under a directory |
+| **Project** | System Overview stats bar → "Simulate project" | DFS from all entry-point candidates |
+
+### 🖥 Interactive CLI
+
+```
+                    mapit> help
+
+  Commands  (connected to http://127.0.0.1:7780)
+  ─────────────────────────────────────────────
+  annotate   – Run AI enrichment (summaries + flaws)
+  remap       – Re-run structural mapping
+  status      – Show project stats
+  flaws       – List AI-detected flaws
+  search <q>  – Search symbols
+  open        – Open web UI in browser
+  help        – Show this help
+  exit        – Stop server and quit
+```
+
+## CLI reference
+
+| Command | What it does |
+|---|---|
+| `mapit` | Splash → map → server → browser → interactive CLI |
+| `mapit init` | Set up AI provider without mapping |
+| `mapit map` | Structural mapping only |
+| `mapit map --force` | Force full re-map (ignore cache) |
+| `mapit annotate` | Run AI enrichment against existing map |
+| `mapit annotate --no-flaws` | Skip flaw-flagging pass |
+| `mapit open` | Start web server without re-mapping |
+| `mapit status` | Print summary: files, symbols, edges, coverage |
+| `mapit find <name>` | Search symbols by name |
+| `mapit explain <name>` | Show signature, callers, callees, summary |
+| `mapit trace <name> [--depth N]` | Print execution trace from an entry point |
+| `mapit flaws [--severity high\|warning\|info]` | List AI-flagged issues |
+| `mapit ask "<question>"` | Ask about the codebase (uses AI) |
+| `mapit config show` | Show current config |
+| `mapit config set-provider <provider>` | Switch AI provider |
+| `mapit config set-model <model>` | Change AI model |
+| `mapit projects list` | List previously mapped projects |
+| `mapit projects remove <path>` | Remove a project from history |
+| `mapit simulate <name> [--level function\|file\|module\|project]` | AI textual simulation |
+
+## Example walkthrough
+
+```bash
+# 1. Run mapit in a project:
+cd ~/my-project
+mapit
+
+# Splash screen appears, mapping runs, browser opens.
+# You're now in the interactive CLI:
+
+mapit> status
+mapit> annotate      # AI enrichment (takes a moment)
+mapit> flaws         # list detected issues
+mapit> search parse  # find all "parse" symbols
+mapit> exit
+```
+
+In the web UI:
+- Click any function node → opens detail panel with AI summary, callers, callees
+- Click "Simulate execution from here" → animated DFS through the call graph
+- Browse files in the file browser → open any file → click "Simulate file"
+- Navigate to a subsystem view → click "Simulate subsystem"
+- Click "Simulate project" in the top bar
+
+## Architecture
+
+```
+mapit/
+  Cargo.toml
+  crates/
+    mapit-core/     — walker, language adapters (6 langs), graph builder,
+    |                 SQLite store, control-flow extraction
+    mapit-ai/       — AI provider trait, Ollama + OpenAI-compatible, prompts
+    mapit-server/   — REST + WebSocket API, embeds web UI via rust-embed
+    mapit-cli/      — binary entry point, all subcommands, interactive CLI
+  web/
+    mapit-web/      — React + TypeScript + Tailwind, 3D force graph
+  docs/             — Full specification docs (data model, schema, etc.)
+```
+
+- **6 language adapters:** Rust, C, C++, assembly, Python, JavaScript/TypeScript
+- **Storage:** SQLite via `rusqlite`
+- **Web UI:** Vite + React 19 + react-force-graph-2d
+- **AI providers:** Ollama (local) or any OpenAI-compatible API
+
+## Requirements
+
+- **macOS** or **Linux** (Windows via MSVC)
+- No other runtime dependencies — the binary is statically linked with embedded web UI.
+
+## Install
+
+### macOS / Linux (one-liner)
+
+```bash
+curl -sfSL https://github.com/ORG/mapit/releases/latest/download/install.sh | sh
+```
+
+### Homebrew
+
+```bash
+brew install ORG/tap/mapit
+```
+
+### Windows (PowerShell)
+
+```powershell
+powershell -c "irm https://github.com/ORG/mapit/releases/latest/download/install.ps1 | iex"
+```
+
+### From source
+
+```bash
+git clone https://github.com/ORG/mapit.git
+cd mapit
+cargo build --release
+./target/release/mapit
+```
+
+## Development
 
 ```bash
 # Build everything (one command):
@@ -10,74 +176,17 @@ cargo build --release
 
 # Run in the current folder:
 ./target/release/mapit
-```
 
-This builds the Rust binary + web UI in one step and launches the interactive map.
-
-On first run, `mapit` prompts for AI provider setup (can skip). Structural mapping (files, symbols, call edges) works without any AI provider.
-
-## Requirements
-
-- **Rust** 1.75+ (for building the binary)
-- **Node.js** 18+ (for the web UI — auto-built via `build.rs`)
-
-## CLI commands
-
-| Command | What it does |
-|---|---|
-| `mapit` | Full flow: init (if first run) → map → open browser |
-| `mapit init` | Set up AI provider without mapping yet |
-| `mapit map` | Structural mapping only (no browser) |
-| `mapit map --force` | Force full re-map (ignore cache) |
-| `mapit annotate` | Run AI enrichment against existing map |
-| `mapit open` | Start web server without re-mapping |
-| `mapit status` | Print summary: files, symbols, edges, coverage |
-| `mapit find <name>` | Search symbols by name |
-| `mapit explain <name>` | Show signature, callers, callees, summary |
-| `mapit trace <name> [--depth N]` | Print execution trace from an entry point |
-| `mapit flaws [--severity high|warning|info]` | List AI-flagged issues |
-| `mapit ask "<question>"` | Ask about the codebase |
-| `mapit config show` | Show current config |
-| `mapit config set-provider <ollama|openai-compatible>` | Switch AI provider |
-| `mapit config set-model <model>` | Change AI model |
-
-## Architecture
-
-```
-mapit/
-  crates/
-    mapit-core/    — walker, language adapters, graph builder, SQLite store, CFG
-    mapit-ai/      — AI provider trait, Ollama + OpenAI-compatible, tasks
-    mapit-server/  — REST + WebSocket API, rust-embed web assets
-    mapit-cli/     — binary entry point, all subcommands
-  web/
-    mapit-web/     — React + TypeScript + Tailwind, 3D force graph + ReactFlow
-  docs/            — Full specification documents (AGENTS.md-driven build)
-```
-
-- **6 language adapters:** Rust, C, C++, assembly, Python, JavaScript/TypeScript
-- **Storage:** SQLite via `rusqlite`
-- **Web UI:** Vite + React 19 + react-force-graph-3d + ReactFlow
-- **AI providers:** Ollama (local, default) or any OpenAI-compatible API
-
-## Development
-
-```bash
-# Build just the web UI (for iteration):
-cd web/mapit-web && npm run build
-
-# Build the Rust binary (auto-rebuilds web if dist/ missing):
-cargo build --release
-
-# Run tests:
+# Run integration tests:
 cargo test --test phase1_integration
 cargo test --test phase2_integration
 cargo test --test phase3_integration
 cargo test --test phase4_integration
 cargo test --test phase5_integration
-```
 
-All 37 integration tests pass: parsing, graph building, incremental remap, CLI queries, AI task round-trip.
+# Frontend only (watch mode):
+cd web/mapit-web && npm run dev
+```
 
 ## License
 

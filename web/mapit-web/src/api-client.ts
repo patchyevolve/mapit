@@ -100,6 +100,8 @@ export const api = {
   annotate: (all = false, force = false) =>
     post<AnnotateResponse>("/annotate", { all, force }),
 
+  cancelAnnotate: () => post<{ status: string }>("/annotate/cancel"),
+
   source: (file: string, start?: number, end?: number) => {
     const params = new URLSearchParams({ file });
     if (start != null) params.set("start", String(start));

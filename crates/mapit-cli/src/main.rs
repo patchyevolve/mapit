@@ -18,6 +18,10 @@ struct Cli {
     #[arg(long, short, global = true, default_value = ".")]
     path: std::path::PathBuf,
 
+    /// Port for the web UI server (overrides config).
+    #[arg(long, global = true)]
+    port: Option<u16>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -38,6 +42,9 @@ enum Commands {
         all: bool,
         #[arg(long)]
         force: bool,
+        /// Skip the flaw-flagging AI pass (saves ~1 call per function).
+        #[arg(long)]
+        no_flaws: bool,
     },
     /// Open the web app without re-mapping.
     Open,
@@ -70,6 +77,13 @@ enum Commands {
     },
     /// Ask a free-form question about the codebase.
     Ask { question: String },
+    /// Simulate runtime behavior of a function, file, module, or the whole project.
+    Simulate {
+        name: String,
+        /// Level of simulation: function, file, module, project.
+        #[arg(long, default_value = "function")]
+        level: String,
+    },
 }
 
 #[tokio::main]
@@ -82,15 +96,16 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let target = cli.path.canonicalize().unwrap_or(cli.path);
+    let port = cli.port;
 
     match cli.command {
-        None => commands::default_run::run(&target).await,
+        None => commands::default_run::run(&target, port).await,
         Some(Commands::Init) => commands::init::run(&target).await,
         Some(Commands::Map { force }) => commands::map::run(&target, force).await,
-        Some(Commands::Annotate { all, force }) => {
-            commands::annotate::run(&target, all, force).await
+        Some(Commands::Annotate { all, force, no_flaws }) => {
+            commands::annotate::run(&target, all, force, no_flaws).await
         }
-        Some(Commands::Open) => commands::open::run(&target).await,
+        Some(Commands::Open) => commands::open::run(&target, port).await,
         Some(Commands::Status) => commands::status::run(&target).await,
         Some(Commands::Find { name }) => commands::find::run(&target, &name).await,
         Some(Commands::Explain { name }) => commands::explain::run(&target, &name).await,
@@ -103,5 +118,8 @@ async fn main() -> Result<()> {
         Some(Commands::Config { action }) => commands::config::run(action).await,
         Some(Commands::Projects { action }) => commands::projects::run(action).await,
         Some(Commands::Ask { question }) => commands::ask::run(&target, &question).await,
+        Some(Commands::Simulate { name, level }) => {
+            commands::simulate::run(&target, &name, &level).await
+        }
     }
 }

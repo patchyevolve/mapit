@@ -7,15 +7,16 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 use mapit_ai::{
     ollama::OllamaProvider,
     openai_compatible::OpenAiCompatibleProvider,
     provider::AiProvider,
-    tasks::{self, SummarizeOutput},
+    tasks::{self, BatchFlagFlawsOutput, BatchSummarizeOutput, SummarizeOutput},
 };
 use mapit_core::graph::model::Node;
 use mapit_core::{
@@ -52,7 +53,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/config/test-chat", post(test_chat_handler))
         .route("/api/remap", post(remap_handler))
         .route("/api/annotate", post(annotate_handler))
+        .route("/api/annotate/cancel", post(cancel_annotate_handler))
         .route("/api/ask", post(ask_handler))
+        .route("/api/simulate", post(simulate_handler))
         .route("/api/source", get(source_handler))
 }
 
@@ -92,6 +95,9 @@ struct RemapBody {
 struct AnnotateBody {
     all: Option<bool>,
     force: Option<bool>,
+    /// If true, skip the flaw-flagging AI pass entirely.
+    /// This saves ~1 AI call per function at the cost of losing flaw flags.
+    skip_flaws: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -353,7 +359,12 @@ async fn nodes_handler(
 async fn edges_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let store = state.store.lock().unwrap();
+    let store = state.store.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("lock poisoned: {}", e) })),
+        )
+    })?;
     let all = store.get_all_edges().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -492,6 +503,10 @@ async fn put_config_handler(
     })?;
 
     if let Some(key) = body.api_key {
+        let provider_name = body
+            .provider
+            .as_deref()
+            .unwrap_or(&global.default_provider);
         let url = body
             .base_url
             .clone()
@@ -502,7 +517,7 @@ async fn put_config_handler(
             .unwrap_or_else(|| global.default_model.clone());
         let mut creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
         creds.providers.insert(
-            "openai-compatible".into(),
+            provider_name.to_owned(),
             mapit_core::config::ProviderCredential {
                 base_url: url,
                 api_key: key,
@@ -540,7 +555,7 @@ async fn remap_handler(
     let db_path = mapit_dir.join("graph.sqlite");
     let ws_tx = state.ws_tx.clone();
 
-    let _ = ws_tx.send(
+    if let Err(e) = ws_tx.send(
         json!({
             "event": "map_progress",
             "phase": "structural",
@@ -548,7 +563,9 @@ async fn remap_handler(
             "total": 0,
         })
         .to_string(),
-    );
+    ) {
+        warn!("WS broadcast (initial progress): {e}");
+    }
 
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&mapit_dir)?;
@@ -594,12 +611,14 @@ async fn remap_handler(
         let diff = diff_manifest(&current_hashes, &manifest);
         let content_map: HashMap<&str, &str> = contents.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
 
-        let _ = ws_tx.send(json!({
+        if let Err(e) = ws_tx.send(json!({
             "event": "map_progress",
             "phase": "structural",
             "current": 0,
             "total": source_files.len(),
-        }).to_string());
+        }).to_string()) {
+            warn!("WS broadcast (reset progress): {e}");
+        }
 
         let mut file_inputs: Vec<FileInput> = Vec::new();
         let mut new_manifest = manifest.clone();
@@ -620,13 +639,15 @@ async fn remap_handler(
                     parse_result: ParseResult::Unchanged,
                     source: None,
                 });
-                let _ = ws_tx.send(json!({
+                if let Err(e) = ws_tx.send(json!({
                     "event": "map_progress",
                     "phase": "structural",
                     "current": current,
                     "total": source_files.len(),
                     "current_file": sf.relative_path,
-                }).to_string());
+                }).to_string()) {
+                    warn!("WS broadcast (unchanged file progress): {e}");
+                }
                 continue;
             }
 
@@ -700,13 +721,15 @@ async fn remap_handler(
                 source: Some(content),
             });
 
-            let _ = ws_tx.send(json!({
+            if let Err(e) = ws_tx.send(json!({
                 "event": "map_progress",
                 "phase": "structural",
                 "current": current,
                 "total": source_files.len(),
                 "current_file": sf.relative_path,
-            }).to_string());
+            }).to_string()) {
+                warn!("WS broadcast (processing file progress): {e}");
+            }
         }
 
         for (path, status) in &diff {
@@ -742,10 +765,13 @@ async fn remap_handler(
         }
         save_project_config(&mapit_dir, &cfg)?;
 
-        let _ = ws_tx.send(json!({
+        if let Err(e) = ws_tx.send(json!({
             "event": "map_phase_complete",
             "phase": "structural",
-        }).to_string());
+            "total": source_files.len(),
+        }).to_string()) {
+            warn!("WS broadcast (phase complete): {e}");
+        }
 
         anyhow::Ok(())
     }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Join error: {e}") }))))?
@@ -767,6 +793,10 @@ async fn annotate_handler(
     let mapit_dir = target.join(".mapit");
     let db_path = mapit_dir.join("graph.sqlite");
     let ws_tx = state.ws_tx.clone();
+    let cancel_flag = state.cancel_flag.clone();
+
+    // Reset cancel flag for fresh run
+    cancel_flag.store(false, Ordering::SeqCst);
 
     let handle = tokio::task::spawn_blocking(move || {
         let store = GraphStore::open(&db_path)?;
@@ -774,7 +804,9 @@ async fn annotate_handler(
         let global_cfg =
             load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
         let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
+
         let provider = create_provider(&global_cfg, &project_cfg)?;
+
         let model = project_cfg
             .model_override
             .as_deref()
@@ -807,142 +839,383 @@ async fn annotate_handler(
             .to_string(),
         );
 
-        for (i, node) in function_nodes.iter().enumerate() {
-            let base = node.base();
-            let callers = get_caller_names(&store, &base.id);
-            let callees = get_callee_names(&store, &base.id);
-            let signature = match node {
-                Node::Function(f) => &f.signature,
-                _ => "",
-            };
-            let start_line = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
-            let end_line = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
-            let language = base.language.as_deref().unwrap_or("");
-            let source_text = read_source_snippet(
-                &target,
-                base.file_path.as_deref().unwrap_or(""),
-                start_line,
-                end_line,
-            );
-            let node_type = format!("{:?}", base.node_type);
+        let skip_flaws = body.skip_flaws.unwrap_or(false);
 
-            // Summarize
-            match tasks::summarize(
-                provider.as_ref(),
-                model,
-                &base.name,
-                &node_type,
-                base.file_path.as_deref().unwrap_or(""),
-                start_line,
-                end_line,
-                language,
-                &source_text,
-                signature,
-                &callers,
-                &callees,
-            ) {
-                Ok(SummarizeOutput { summary }) => {
-                    let mut updated = node.clone();
-                    updated.base_mut().ai_summary = Some(summary);
-                    updated.base_mut().ai_summary_status = AiSummaryStatus::Ready;
-                    updated.base_mut().ai_model_used = Some(format!("{}/{}", provider.id(), model));
-                    if let Err(e) = store.upsert_node(&updated) {
-                        error!("Failed to save annotation for {}: {e}", base.name);
+        // ── Phase 0: Project-level overview ────────────────────────────
+        // One cheap AI call to understand the whole system before summarizing
+        // individual functions. The overview is injected into every batch prompt
+        // so each function summary understands its role in the larger system.
+        let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for node in &function_nodes {
+            if let Some(fp) = node.base().file_path.as_deref() {
+                for depth in 0..3 {
+                    if let Some(idx) = fp.match_indices('/').nth(depth).map(|(i, _)| i) {
+                        dirs.insert(fp[..idx].to_owned());
                     }
                 }
-                Err(e) => {
-                    error!("AI summarize failed for {}: {e}", base.name);
-                    let mut updated = node.clone();
-                    updated.base_mut().ai_summary_status = AiSummaryStatus::Unavailable;
-                    let _ = store.upsert_node(&updated);
-                }
             }
+        }
+        let file_tree: Vec<String> = dirs.iter().map(|d| format!("  {d}/")).collect();
+        let entry_points: Vec<String> = function_nodes.iter()
+            .filter(|n| matches!(n, Node::Function(f) if f.is_entry_point_candidate && !f.has_incoming_calls))
+            .map(|n| format!("  {} ({})", n.base().name, n.base().file_path.as_deref().unwrap_or("")))
+            .collect();
+        let public_symbols: Vec<String> = function_nodes.iter()
+            .filter(|n| !n.base().name.starts_with('_'))
+            .map(|n| format!("  {} ({})", n.base().name, n.base().file_path.as_deref().unwrap_or("")))
+            .take(50)
+            .collect();
+        let project_overview = match tasks::summarize_project(
+            provider.as_ref(),
+            model,
+            &file_tree.join("\n"),
+            &if entry_points.is_empty() { "  (none found)".into() } else { entry_points.join("\n") },
+            &public_symbols.join("\n"),
+        ) {
+            Ok(out) => {
+                info!("Project overview: {}", out.overview);
+                Some(out.overview)
+            }
+            Err(e) => {
+                warn!("Project overview failed (continuing without): {e}");
+                None
+            }
+        };
 
-            // Flaw flagging
-            let has_incoming = match node {
-                Node::Function(f) => f.has_incoming_calls,
-                _ => false,
-            };
-            let is_entry = match node {
-                Node::Function(f) => f.is_entry_point_candidate,
-                _ => false,
-            };
-            match tasks::flag_flaws(
-                provider.as_ref(),
-                model,
-                &base.name,
-                base.file_path.as_deref().unwrap_or(""),
-                start_line,
-                end_line,
-                has_incoming,
-                is_entry,
-                language,
-                &source_text,
-                signature,
-                &callers,
-                &callees,
-            ) {
-                Ok(output) => {
-                    for flaw in &output.flaws {
-                        let flaw_flag = FlawFlag {
-                            id: format!("flaw_{}", base.name),
-                            kind: match flaw.kind.as_str() {
-                                "dead_code" => FlawKind::DeadCode,
-                                "circular_dependency" => FlawKind::CircularDependency,
-                                "structural_smell" => FlawKind::StructuralSmell,
-                                "suspected_bug" => FlawKind::SuspectedBug,
-                                "missing_error_handling" => FlawKind::MissingErrorHandling,
-                                "resource_leak_pattern" => FlawKind::ResourceLeakPattern,
-                                _ => FlawKind::StructuralSmell,
-                            },
-                            severity: match flaw.severity.as_str() {
-                                "info" => FlawSeverity::Info,
-                                "warning" => FlawSeverity::Warning,
-                                "high" => FlawSeverity::High,
-                                _ => FlawSeverity::Warning,
-                            },
-                            description: flaw.description.clone(),
-                            confidence: flaw.confidence,
-                            basis: match flaw.basis.as_str() {
-                                "structural" => FlawBasis::Structural,
-                                "ai" => FlawBasis::Ai,
-                                "structural+ai" => FlawBasis::StructuralPlusAi,
-                                _ => FlawBasis::Structural,
-                            },
-                            related_node_ids: None,
-                        };
-                        if let Err(e) = store.upsert_flaw(&flaw_flag, &base.id) {
-                            error!("Failed to persist flaw for {}: {e}", base.name);
+        // ── Pass 1: Batch summarize by file ────────────────────────────
+        // Group function nodes by file_path so we can call the AI once per file
+        let mut by_file: std::collections::HashMap<&str, Vec<&Node>> = std::collections::HashMap::new();
+        for node in &function_nodes {
+            let fp = node.base().file_path.as_deref().unwrap_or("unknown");
+            by_file.entry(fp).or_default().push(node);
+        }
+
+        // Sort files by dependency depth (callee files first, caller files last).
+        // This way, when we annotate a file, its callees' summaries already exist.
+        let mut func_to_file: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for node in &function_nodes {
+            func_to_file.insert(&node.base().id, node.base().file_path.as_deref().unwrap_or("unknown"));
+        }
+        let mut file_callee_set: std::collections::HashMap<&str, std::collections::HashSet<&str>> = std::collections::HashMap::new();
+        for (&fp, nodes) in &by_file {
+            let mut callee_fps = std::collections::HashSet::new();
+            for node in nodes {
+                if let Ok(edges) = store.edges_from(&node.base().id) {
+                    for edge in &edges {
+                        if matches!(edge.edge_type, model::EdgeType::Calls) {
+                            if let Some(&cfp) = func_to_file.get(edge.to_id.as_str()) {
+                                if cfp != fp { callee_fps.insert(cfp); }
+                            }
                         }
                     }
                 }
-                Err(e) => {
-                    error!("AI flaw-flagging failed for {}: {e}", base.name);
+            }
+            file_callee_set.insert(fp, callee_fps);
+        }
+        fn compute_file_depth<'a>(
+            fp: &'a str,
+            callee_map: &std::collections::HashMap<&'a str, std::collections::HashSet<&'a str>>,
+            memo: &mut std::collections::HashMap<&'a str, usize>,
+        ) -> usize {
+            if let Some(&d) = memo.get(fp) { return d; }
+            // Insert with 0 before recursing to break circular dependencies
+            memo.insert(fp, 0);
+            let mut max_d = 0usize;
+            if let Some(callees) = callee_map.get(fp) {
+                for callee in callees {
+                    let d = compute_file_depth(callee, callee_map, memo) + 1;
+                    max_d = max_d.max(d);
                 }
+            }
+            memo.insert(fp, max_d);
+            max_d
+        }
+        let all_fps: Vec<&str> = by_file.keys().copied().collect();
+        let mut depth_memo: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for fp in &all_fps { compute_file_depth(fp, &file_callee_set, &mut depth_memo); }
+        let mut sorted_fps: Vec<&&str> = all_fps.iter().collect();
+        sorted_fps.sort_by_key(|fp| depth_memo.get(*fp).copied().unwrap_or(0));
+
+        let mut processed_count = 0usize;
+
+        for file_path in sorted_fps {
+            let nodes_in_file = &by_file[file_path];
+            if cancel_flag.load(Ordering::SeqCst) {
+                info!("Annotation cancelled by user");
+                let _ = ws_tx.send(
+                    json!({"event": "map_phase_complete", "phase": "ai_enrichment", "total": function_nodes.len()}).to_string(),
+                );
+                return anyhow::Ok(0);
+            }
+
+            // Build per-function descriptions with source code (first 15 lines) and caller context
+            let language = nodes_in_file[0].base().language.as_deref().unwrap_or("");
+            let mut descs = Vec::new();
+            let mut name_to_node: std::collections::HashMap<&str, &Node> = std::collections::HashMap::new();
+            for (idx, node) in nodes_in_file.iter().enumerate() {
+                let base = node.base();
+                let sig = match node { Node::Function(f) => &f.signature, _ => "" };
+                let callers = get_caller_names(&store, &base.id);
+                let callees = get_callee_names(&store, &base.id);
+                let sl = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
+                let el = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
+                // Include caller summaries when already annotated (cross-file context)
+                let caller_context: Vec<String> = callers.iter().filter_map(|cname| {
+                    let cid = store.search_nodes_by_name(cname).ok()?.into_iter().find(|n| n.base().name == *cname)?.base().id.clone();
+                    store.get_node(&cid).ok().flatten().and_then(|n| n.base().ai_summary.clone()).map(|s| format!("{cname}: {s}"))
+                }).collect();
+                let caller_context_str = if caller_context.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n   Caller context:\n     {}", caller_context.join("\n     "))
+                };
+                // Read source code (truncated to 15 lines to keep prompts manageable)
+                let src = read_source_snippet(&target, base.file_path.as_deref().unwrap_or(""), sl, el);
+                let src_lines: Vec<&str> = src.lines().collect();
+                let src_short = if src_lines.len() > 15 {
+                    format!("{}\n   (... truncated, {}+ lines total)", src_lines[..15].join("\n"), src_lines.len())
+                } else {
+                    src.to_owned()
+                };
+                descs.push(format!(
+                    "{idx}. Function: `{}`\n   Signature: {}\n   Lines: {sl}-{el}\n   Callers: {}\n   Callees: {}{caller_context_str}\n   Code:\n   ```{language}\n{src_short}\n   ```",
+                    base.name, sig, callers.join(", "), callees.join(", "),
+                ));
+                name_to_node.entry(&base.name).or_insert(node);
             }
 
             let _ = ws_tx.send(
                 json!({
                     "event": "map_progress",
                     "phase": "ai_enrichment",
-                    "current": i + 1,
+                    "current": processed_count,
                     "total": function_nodes.len(),
-                    "current_file": base.file_path,
-                })
-                .to_string(),
+                    "current_file": file_path,
+                    "current_symbol": format!("{} functions", nodes_in_file.len()),
+                }).to_string(),
             );
+
+            // Batch summarize all functions in this file
+            let batch_result = tasks::summarize_batch(
+                provider.as_ref(),
+                model,
+                file_path,
+                language,
+                project_overview.as_deref(),
+                &descs,
+            );
+
+            match batch_result {
+                Ok(BatchSummarizeOutput { summaries }) => {
+                    let mut applied = std::collections::HashSet::new();
+                    for entry in &summaries {
+                        if let Some(node) = name_to_node.get(entry.name.as_str()) {
+                            let mut updated = (*node).clone();
+                            updated.base_mut().ai_summary = Some(entry.summary.clone());
+                            updated.base_mut().ai_summary_status = AiSummaryStatus::Ready;
+                            updated.base_mut().ai_model_used = Some(format!("{}/{}", provider.id(), model));
+                            if let Err(e) = store.upsert_node(&updated) {
+                                error!("Failed to save batch annotation for {}: {e}", entry.name);
+                            }
+                            applied.insert(entry.name.as_str());
+                        }
+                    }
+                    // Mark any functions the AI skipped as Unavailable
+                    for (name, node) in &name_to_node {
+                        if !applied.contains(name) {
+                            let mut updated = (*node).clone();
+                            updated.base_mut().ai_summary_status = AiSummaryStatus::Unavailable;
+                            let _ = store.upsert_node(&updated);
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Batch failed — mark ALL functions in this file Unavailable
+                    let err_msg = format!("Batch summarize failed for {file_path}: {e}");
+                    error!("{err_msg}");
+                    for node in nodes_in_file {
+                        let mut updated = (*node).clone();
+                        updated.base_mut().ai_summary_status = AiSummaryStatus::Unavailable;
+                        let _ = store.upsert_node(&updated);
+                    }
+                    let _ = ws_tx.send(
+                        json!({
+                            "event": "error",
+                            "scope": "ai_call",
+                            "message": err_msg,
+                            "detail": "Check Settings → API Connection or try a different model/provider."
+                        }).to_string(),
+                    );
+                    // Continue to next file rather than aborting the whole run
+                    processed_count += nodes_in_file.len();
+                    continue;
+                }
+            }
+
+            // ── Optional: Batch flaw flagging by file ──────────────────
+            if !skip_flaws {
+                let mut flaw_descs = Vec::new();
+                for node in nodes_in_file {
+                    let base = node.base();
+                    let callers = get_caller_names(&store, &base.id);
+                    let callees = get_callee_names(&store, &base.id);
+                    let sig = match node { Node::Function(f) => &f.signature, _ => "" };
+                    let sl = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
+                    let el = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
+                    let lang = base.language.as_deref().unwrap_or("");
+                    let src = read_source_snippet(&target, base.file_path.as_deref().unwrap_or(""), sl, el);
+                    let has_incoming = match node { Node::Function(f) => f.has_incoming_calls, _ => false };
+                    let is_entry = match node { Node::Function(f) => f.is_entry_point_candidate, _ => false };
+                    flaw_descs.push(format!(
+                        r#"--- Function: `{}` ---
+Signature: {sig}
+Lines: {sl}-{el}
+has_incoming_calls: {has_incoming}
+is_entry_point_candidate: {is_entry}
+Callers: {}
+Callees: {}
+Source code:
+```{lang}
+{src}
+```"#,
+                        base.name, callers.join(", "), callees.join(", "),
+                    ));
+                }
+                let flaw_result = tasks::flag_flaws_batch(
+                    provider.as_ref(),
+                    model,
+                    file_path,
+                    language,
+                    project_overview.as_deref(),
+                    &flaw_descs,
+                );
+                match flaw_result {
+                    Ok(BatchFlagFlawsOutput { flaws }) => {
+                        for node in nodes_in_file {
+                            let base = node.base();
+                            let is_dc_candidate = model::is_dead_code_candidate(node);
+                            let func_flaws = flaws.get(&base.name).map(|v| v.as_slice()).unwrap_or(&[]);
+                            for (flaw_idx, flaw) in func_flaws.iter().enumerate() {
+                                let kind = match flaw.kind.as_str() {
+                                    "dead_code" => FlawKind::DeadCode,
+                                    "circular_dependency" => FlawKind::CircularDependency,
+                                    "structural_smell" => FlawKind::StructuralSmell,
+                                    "suspected_bug" => FlawKind::SuspectedBug,
+                                    "missing_error_handling" => FlawKind::MissingErrorHandling,
+                                    "resource_leak_pattern" => FlawKind::ResourceLeakPattern,
+                                    _ => FlawKind::StructuralSmell,
+                                };
+                                if kind == FlawKind::DeadCode && !is_dc_candidate { continue; }
+                                let flaw_flag = FlawFlag {
+                                    id: format!("flaw_{}_{}", base.id, flaw_idx),
+                                    kind,
+                                    severity: match flaw.severity.as_str() {
+                                        "info" => FlawSeverity::Info,
+                                        "warning" => FlawSeverity::Warning,
+                                        "high" => FlawSeverity::High,
+                                        _ => FlawSeverity::Warning,
+                                    },
+                                    description: flaw.description.clone(),
+                                    confidence: flaw.confidence,
+                                    basis: match flaw.basis.as_str() {
+                                        "structural" => FlawBasis::Structural,
+                                        "ai" => FlawBasis::Ai,
+                                        "structural+ai" => FlawBasis::StructuralPlusAi,
+                                        _ => FlawBasis::Structural,
+                                    },
+                                    related_node_ids: None,
+                                };
+                                if let Err(e) = store.upsert_flaw(&flaw_flag, &base.id) {
+                                    error!("Failed to persist flaw for {}: {e}", base.name);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Batch flaw-flagging failed for {file_path}: {e}");
+                    }
+                }
+            }
+
+            processed_count += nodes_in_file.len();
+        }
+
+        // ── 2. File-level summarization ──────────────────────────────────────
+        let all_annotated = store.get_all_nodes()?;
+        let mut file_children: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for n in &all_annotated {
+            if let Some(fp) = n.base().file_path.as_deref() {
+                if matches!(n, Node::Function(_)) && n.base().ai_summary_status == AiSummaryStatus::Ready {
+                    let b = n.base();
+                    let entry = format!("  - {} (function): {}",
+                        b.name, b.ai_summary.as_deref().unwrap_or("(no summary)"));
+                    file_children.entry(fp.to_owned()).or_default().push(entry);
+                }
+            }
+        }
+        let file_nodes: Vec<&Node> = all_annotated
+            .iter()
+            .filter(|n| n.base().node_type == model::NodeType::File)
+            .filter(|n| file_children.contains_key(n.base().file_path.as_deref().unwrap_or("")))
+            .filter(|n| {
+                if force { return true; }
+                n.base().ai_summary_status != AiSummaryStatus::Ready
+            })
+            .collect();
+
+        for (fi, file_node) in file_nodes.iter().enumerate() {
+            if cancel_flag.load(Ordering::SeqCst) { return anyhow::Ok(function_nodes.len()); }
+
+            let base = file_node.base();
+            let fp = base.file_path.as_deref().unwrap_or("");
+            let language = base.language.as_deref().unwrap_or("");
+            let symbol_summaries = file_children.get(fp).cloned().unwrap_or_default();
+            if symbol_summaries.is_empty() { continue; }
+
+            let _ = ws_tx.send(json!({
+                "event": "map_progress",
+                "phase": "ai_enrichment",
+                "current": fi + 1,
+                "total": file_nodes.len(),
+                "current_file": base.file_path,
+                "current_symbol": format!("[file] {}", base.name),
+            }).to_string());
+
+            match tasks::summarize_file(
+                provider.as_ref(),
+                model,
+                base.file_path.as_deref().unwrap_or(""),
+                language,
+                &symbol_summaries,
+            ) {
+                Ok(SummarizeOutput { summary }) => {
+                    let mut updated = (*file_node).clone();
+                    updated.base_mut().ai_summary = Some(summary);
+                    updated.base_mut().ai_summary_status = AiSummaryStatus::Ready;
+                    updated.base_mut().ai_model_used =
+                        Some(format!("{}/{}", provider.id(), model));
+                    if let Err(e) = store.upsert_node(&updated) {
+                        error!("Failed to save file summary for {}: {e}", base.name);
+                    }
+                }
+                Err(e) => {
+                    error!("AI file summarize failed for {}: {e}", base.name);
+                }
+            }
         }
 
         let _ = ws_tx.send(
             json!({
                 "event": "map_phase_complete",
                 "phase": "ai_enrichment",
+                "total": function_nodes.len(),
             })
             .to_string(),
         );
 
         anyhow::Ok(function_nodes.len())
     });
+
     // Fire-and-forget — return 202 immediately; progress arrives via WebSocket.
     // Errors in the background task are logged, not surfaced as HTTP errors.
     tokio::spawn(async move {
@@ -958,49 +1231,206 @@ async fn annotate_handler(
     })))
 }
 
+async fn cancel_annotate_handler(
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    state.cancel_flag.store(true, Ordering::SeqCst);
+    Json(json!({ "status": "cancelling" }))
+}
+
+// ---------------------------------------------------------------------------
+// Simulation handler
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct SimulateBody {
+    name: String,
+    level: Option<String>,
+}
+
+async fn simulate_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SimulateBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let name = body.name.clone();
+    let level = body.level.unwrap_or_else(|| "function".into());
+    let db_path = state.project_root.join(".mapit/graph.sqlite");
+    let target = state.project_root.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let store = GraphStore::open(&db_path)?;
+        let global_cfg = load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
+        let mapit_dir = target.join(".mapit");
+        let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
+        let provider = create_provider(&global_cfg, &project_cfg)?;
+        let model = project_cfg.model_override.as_deref().unwrap_or(&global_cfg.default_model);
+
+        let overview = String::new();
+        let context = String::new();
+
+        anyhow::Ok(json!({
+            "status": "simulate_endpoint_active",
+            "name": name,
+            "level": level,
+        }))
+    }).await;
+
+    match result {
+        Ok(Ok(val)) => Ok(Json(val)),
+        Ok(Err(e)) => Ok(Json(json!({"error": e.to_string()}))),
+        Err(e) => Ok(Json(json!({"error": e.to_string()}))),
+    }
+}
+
 async fn ask_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AskBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let store = state.store.lock().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-    })?;
-
-    // Simple search-based answer: find nodes matching the question
-    let results = store
-        .search_nodes_by_name(&body.question)
-        .unwrap_or_default();
-    let referenced: Vec<String> = results.iter().map(|n| n.id().to_string()).collect();
-
-    let answer = if referenced.is_empty() {
-        "No relevant context found in the codebase.".to_string()
-    } else {
-        let names: Vec<&str> = results
+    let (results, file_summaries) = {
+        let store = state.store.lock().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+        })?;
+        let nodes = store.search_nodes_by_text(&body.question).unwrap_or_default();
+        // Build a map of file_path → file-level summary for any file
+        // that contains a matching node
+        let file_paths: std::collections::HashSet<String> = nodes
             .iter()
-            .map(|n| n.base().name.as_str())
-            .take(5)
+            .filter_map(|n| n.base().file_path.clone())
             .collect();
+        let mut summaries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        if let Ok(all) = store.get_all_nodes() {
+            for n in &all {
+                if n.base().node_type != model::NodeType::File { continue; }
+                let fp = match n.base().file_path.as_deref() {
+                    Some(fp) if file_paths.contains(fp) => fp,
+                    _ => continue,
+                };
+                if let Some(s) = n.base().ai_summary.as_deref() {
+                    summaries.insert(fp.to_owned(), s.to_owned());
+                }
+            }
+        }
+        (nodes, summaries)
+    };
+
+    let referenced: Vec<String> = results.iter().map(|n| n.id().to_string()).collect();
+    let question = body.question;
+
+    // Try to use AI
+    let mapit_dir = state.project_root.join(".mapit");
+    let global_cfg = load_global_config(&mapit_core::config::global_config_dir()).unwrap_or_default();
+    let project_cfg = load_project_config(&mapit_dir).unwrap_or_default();
+    let model = project_cfg
+        .model_override
+        .as_deref()
+        .unwrap_or(&global_cfg.default_model);
+
+    let make_name_fallback = || -> Json<Value> {
+        let answer = if referenced.is_empty() {
+            "No relevant context found in the codebase.".to_string()
+        } else {
+            let names: Vec<&str> = results
+                .iter()
+                .map(|n| n.base().name.as_str())
+                .take(5)
+                .collect();
+            format!(
+                "Found {} related symbols: {}",
+                referenced.len(),
+                names.join(", ")
+            )
+        };
+        let grounding = if referenced.is_empty() {
+            "no_relevant_context_found"
+        } else {
+            "ok"
+        };
+        Json(json!({
+            "answer": answer,
+            "referenced_node_ids": referenced,
+            "grounding_status": grounding,
+        }))
+    };
+
+    // Build AI context from matching nodes
+    let mut context_parts: Vec<String> = Vec::new();
+    for node in results.iter().take(15) {
+        let base = node.base();
+        let type_str = match node {
+            Node::Function(_) => "function",
+            _ => "symbol",
+        };
+        let mut part = format!(
+            "Symbol: {}\n  File: {}\n  Type: {}\n",
+            base.name,
+            base.file_path.as_deref().unwrap_or("unknown"),
+            type_str,
+        );
+        if let Some(s) = &base.ai_summary {
+            part.push_str(&format!("  Summary: {s}\n"));
+        }
+        // Also include the file-level summary if available
+        if let Some(fp) = base.file_path.as_deref() {
+            if let Some(fs) = file_summaries.get(fp) {
+                part.push_str(&format!("  File overview: {fs}\n"));
+            }
+        }
+        if let Node::Function(f) = node {
+            if f.has_incoming_calls {
+                part.push_str("  Called by other functions: yes\n");
+            }
+            if f.is_entry_point_candidate {
+                part.push_str("  Entry point candidate: yes\n");
+            }
+        }
+        context_parts.push(part);
+    }
+
+    let context = if context_parts.is_empty() {
+        "No relevant symbols found in the codebase.".to_string()
+    } else {
+        let count = context_parts.len();
+        let body = context_parts.join("\n");
         format!(
-            "Found {} related symbols: {}",
-            referenced.len(),
-            names.join(", ")
+            "The codebase has {count} symbol(s) relevant to the question:\n\n{body}"
         )
     };
 
-    let grounding = if referenced.is_empty() {
-        "no_relevant_context_found"
-    } else {
-        "ok"
+    let provider = match create_provider(&global_cfg, &project_cfg) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("AI provider not available for ask: {e:#}");
+            return Ok(make_name_fallback());
+        }
     };
 
-    Ok(Json(json!({
-        "answer": answer,
-        "referenced_node_ids": referenced,
-        "grounding_status": grounding,
-    })))
+    match tasks::answer(provider.as_ref(), &model, &context, &question) {
+        Ok(output) => {
+            let grounding = if output.referenced_node_ids.is_empty() && referenced.is_empty() {
+                "no_relevant_context_found"
+            } else {
+                "ok"
+            };
+            let mut all_refs = output.referenced_node_ids.clone();
+            for id in &referenced {
+                if !all_refs.contains(id) {
+                    all_refs.push(id.clone());
+                }
+            }
+            Ok(Json(json!({
+                "answer": output.answer,
+                "referenced_node_ids": all_refs,
+                "grounding_status": grounding,
+            })))
+        }
+        Err(e) => {
+            warn!("AI answer failed: {e:#}");
+            Ok(make_name_fallback())
+        }
+    }
 }
 
 async fn source_handler(
@@ -1290,13 +1720,11 @@ fn create_provider(
         "openai-compatible" => {
             let config_dir = mapit_core::config::global_config_dir();
             let creds = mapit_core::config::load_credentials(&config_dir).unwrap_or_default();
-            let api_key = creds
-                .providers
-                .get("openai-compatible")
-                .map(|c| c.api_key.clone())
-                .unwrap_or_default();
+            let entry = creds.providers.get("openai-compatible");
+            let base_url = entry.map(|c| c.base_url.clone()).unwrap_or_default();
+            let api_key = entry.map(|c| c.api_key.clone()).unwrap_or_default();
             Ok(Box::new(OpenAiCompatibleProvider {
-                base_url: global.ollama_base_url.clone(),
+                base_url,
                 api_key,
                 model: global.default_model.clone(),
             }))

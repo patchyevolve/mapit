@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use mapit_core::graph::store::GraphStore;
@@ -10,6 +11,7 @@ pub struct AppState {
     pub progress: Arc<Mutex<ProgressState>>,
     pub project_root: PathBuf,
     pub mapit_dir: PathBuf,
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]

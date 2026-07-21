@@ -155,6 +155,7 @@ impl<'a> JsExtractor<'a> {
 
     fn handle_variable_decl(&mut self, node: Node) {
         // Look for: `const/let/var name = () => {}` or `= function() {}`
+        let mut matched = Vec::new();
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "variable_declarator" {
@@ -168,11 +169,16 @@ impl<'a> JsExtractor<'a> {
                 }
                 if let Some(value) = child.child_by_field_name("value") {
                     if matches!(value.kind(), "arrow_function" | "function") {
-                        self.emit_function(value, &name, false);
-                        return;
+                        matched.push((value, name));
                     }
                 }
             }
+        }
+        if !matched.is_empty() {
+            for (value, name) in matched {
+                self.emit_function(value, &name, false);
+            }
+            return;
         }
         // Also recurse for other variable declarations
         let mut cursor2 = node.walk();

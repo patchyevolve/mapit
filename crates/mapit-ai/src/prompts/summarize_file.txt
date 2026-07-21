@@ -1,0 +1,12 @@
+You are analyzing source code. Given a file and the summaries of every function/type/macro defined inside it, write a short paragraph explaining what this file does as a whole — its purpose, its main exports, and how it fits into the project.
+
+File: {{file_path}}
+Language: {{language}}
+
+Functions/symbols defined in this file:
+{{symbols_summaries}}
+
+Respond with a JSON object:
+{
+  "summary": "one paragraph explaining the file's purpose, its main exports, and how it connects to the rest of the project"
+}

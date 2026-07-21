@@ -161,7 +161,7 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
 
     for file in files {
         let file_node_id =
-            compute_node_id(file.relative_path, &NodeType::File, file.relative_path);
+            compute_node_id(file.relative_path, &NodeType::File, "");
 
         let defs = file_defs.get(file.relative_path).cloned().unwrap_or_default();
         for qname in &defs {
@@ -187,7 +187,7 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
 
     for file in files {
         let file_node_id =
-            compute_node_id(file.relative_path, &NodeType::File, file.relative_path);
+            compute_node_id(file.relative_path, &NodeType::File, "");
 
         let imports = match &file.parse_result {
             ParseResult::Ok(output) => &output.imports,
@@ -226,7 +226,18 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
     // Pass 4: emit "calls" edges from symbol references
     // -----------------------------------------------------------------------
 
-    // Build a mapping: file_path -> set of file_paths it imports (for
+    // Reverse map: file node id -> relative path (for import-based resolution)
+    let file_node_id_to_path: HashMap<String, String> = files
+        .iter()
+        .map(|f| {
+            (
+                compute_node_id(f.relative_path, &NodeType::File, ""),
+                f.relative_path.to_owned(),
+            )
+        })
+        .collect();
+
+    // Build a mapping: file_path -> set of import target file paths (for
     // confidence tiering in resolution).
     let mut import_map: HashMap<String, Vec<String>> = HashMap::new();
     for file in files {
@@ -236,12 +247,13 @@ pub fn build(files: &[FileInput]) -> Result<BuildOutput> {
             _ => continue,
         };
         for import in imports {
-            // Record any resolved import targets
             if let Some(tid) = resolve_import_to_file(&import.target, files, &qualified_map) {
-                import_map
-                    .entry(file.relative_path.to_owned())
-                    .or_default()
-                    .push(tid);
+                if let Some(imp_path) = file_node_id_to_path.get(&tid) {
+                    import_map
+                        .entry(file.relative_path.to_owned())
+                        .or_default()
+                        .push(imp_path.clone());
+                }
             }
         }
     }
@@ -353,6 +365,9 @@ fn resolve_call(
 ) -> (Option<String>, EdgeConfidence) {
     // Strip trailing `!` from macro calls for resolution purposes
     let lookup_name = called_name.trim_end_matches('!');
+    // Extract the simple name (last segment after ::) for fallback resolution
+    // e.g. "utils::double" -> "double", "lib::compute" -> "compute"
+    let simple_name = lookup_name.rsplit("::").next().unwrap_or(lookup_name);
 
     // 1. Exact: qualified name matches directly (e.g. "MyStruct::method")
     if let Some(id) = qualified_map.get(lookup_name) {
@@ -363,7 +378,7 @@ fn resolve_call(
     if let Some(same_file_defs) = file_defs.get(caller_file) {
         for qname in same_file_defs {
             let simple = qname.rsplit("::").next().unwrap_or(qname);
-            if simple == lookup_name {
+            if simple == lookup_name || simple == simple_name {
                 if let Some(id) = qualified_map.get(qname) {
                     return (Some(id.clone()), EdgeConfidence::Exact);
                 }
@@ -377,7 +392,7 @@ fn resolve_call(
             if let Some(imp_defs) = file_defs.get(imp_file) {
                 for qname in imp_defs {
                     let simple = qname.rsplit("::").next().unwrap_or(qname);
-                    if simple == lookup_name {
+                    if simple == lookup_name || simple == simple_name {
                         if let Some(id) = qualified_map.get(qname) {
                             return (Some(id.clone()), EdgeConfidence::Probable);
                         }
@@ -388,18 +403,20 @@ fn resolve_call(
     }
 
     // 4. Probable: name found anywhere in the project (single match)
-    if let Some(candidates) = name_map.get(lookup_name) {
-        if candidates.len() == 1 {
-            return (Some(candidates[0].0.clone()), EdgeConfidence::Probable);
-        } else if candidates.len() > 1 {
-            // Ambiguous — pick the first but mark as probable
-            warn!(
-                "Ambiguous call to '{}' from '{}': {} candidates, using first",
-                called_name,
-                caller_file,
-                candidates.len()
-            );
-            return (Some(candidates[0].0.clone()), EdgeConfidence::Probable);
+    // Try the full lookup_name first, fall back to simple_name for scoped calls.
+    for candidate_name in [lookup_name, simple_name] {
+        if let Some(candidates) = name_map.get(candidate_name) {
+            if candidates.len() == 1 {
+                return (Some(candidates[0].0.clone()), EdgeConfidence::Probable);
+            } else if candidates.len() > 1 {
+                warn!(
+                    "Ambiguous call to '{}' from '{}': {} candidates, using first",
+                    candidate_name,
+                    caller_file,
+                    candidates.len()
+                );
+                return (Some(candidates[0].0.clone()), EdgeConfidence::Probable);
+            }
         }
     }
 
@@ -427,7 +444,7 @@ fn resolve_import_to_file(
             return Some(compute_node_id(
                 file.relative_path,
                 &NodeType::File,
-                file.relative_path,
+                "",
             ));
         }
     }
@@ -447,7 +464,7 @@ fn build_file_node(file: &FileInput) -> Node {
         ParseResult::Unsupported => (ParseStatus::UnsupportedLanguage, None),
     };
 
-    let node_id = compute_node_id(file.relative_path, &NodeType::File, file.relative_path);
+    let node_id = compute_node_id(file.relative_path, &NodeType::File, "");
 
     Node::File(FileNode {
         base: BaseNode {

@@ -1,0 +1,17 @@
+You are analyzing a software project to provide system-level context for code annotation.
+
+Project directory structure (top 3 levels):
+{{file_tree}}
+
+Entry point functions (no callers, likely program starts):
+{{entry_points}}
+
+Key exported/public symbols:
+{{public_symbols}}
+
+Based on this information, write a 2-3 sentence overview of what this project does, its architecture, and the main technologies/frameworks it uses. This overview will be included as context when summarizing individual functions.
+
+Respond with a JSON object:
+{
+  "overview": "2-3 sentence project description"
+}

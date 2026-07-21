@@ -142,8 +142,24 @@ fn push_label_def(output: &mut AdapterOutput, name: &str, start_line: u32, end_l
 }
 
 fn dedup_definitions(output: &mut AdapterOutput) {
+    // Collect which names ever had is_entry_point_candidate = true
+    let ep_names: std::collections::HashSet<String> = output
+        .definitions
+        .iter()
+        .filter(|d| d.is_entry_point_candidate)
+        .map(|d| d.name.clone())
+        .collect();
+
+    // Dedup by name (keep first occurrence)
     let mut seen = std::collections::HashSet::new();
     output.definitions.retain(|d| seen.insert(d.name.clone()));
+
+    // Restore is_entry_point_candidate on the surviving definition
+    for def in &mut output.definitions {
+        if ep_names.contains(&def.name) {
+            def.is_entry_point_candidate = true;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

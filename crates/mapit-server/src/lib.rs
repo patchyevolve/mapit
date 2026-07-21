@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -19,7 +20,7 @@ pub mod api;
 pub mod state;
 
 #[derive(RustEmbed)]
-#[folder = "../../web/mapit-web/dist"]
+#[folder = "embedded_dist"]
 struct WebAssets;
 
 /// Serve a single embedded file, with SPA fallback to index.html.
@@ -53,6 +54,21 @@ async fn serve_static(uri: Uri) -> Response {
     }
 }
 
+/// Try `preferred` port first; if busy, scan upwards until a free one is found.
+pub async fn find_free_port(preferred: u16) -> Result<u16> {
+    for port in preferred..=65535 {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                drop(listener);
+                return Ok(port);
+            }
+            Err(_) => continue,
+        }
+    }
+    anyhow::bail!("no free port found in range {preferred}..=65535")
+}
+
 /// Start the mapit HTTP server on `127.0.0.1:<port>`.
 /// Blocks until the server shuts down (e.g., via Ctrl+C).
 pub async fn serve(db_path: &Path, port: u16, project_root: Option<&Path>) -> Result<()> {
@@ -71,6 +87,7 @@ pub async fn serve(db_path: &Path, port: u16, project_root: Option<&Path>) -> Re
         progress: Arc::new(Mutex::new(state::ProgressState::default())),
         project_root: root,
         mapit_dir,
+        cancel_flag: Arc::new(AtomicBool::new(false)),
     });
 
     let ws_route = get(move |ws: axum::extract::ws::WebSocketUpgrade, State(state): State<Arc<state::AppState>>| async move {

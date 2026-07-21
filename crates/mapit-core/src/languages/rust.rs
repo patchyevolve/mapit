@@ -279,19 +279,16 @@ impl<'a> RustExtractor<'a> {
     }
 
     fn extract_signature(&self, node: Node) -> String {
-        // Grab everything up to (but not including) the body block
-        let body_start = node
-            .child_by_field_name("body")
-            .map(|b| b.start_position().column)
-            .unwrap_or(0);
-
-        let full = self.node_text(node);
-        // Take only the first line if it contains the signature
-        let first_line = full.lines().next().unwrap_or("");
-        // Strip any trailing opening brace on the same line
-        let sig = first_line.trim_end_matches('{').trim();
-        let _ = body_start; // suppressed; column info available if needed
-        sig.to_owned()
+        if let Some(body) = node.child_by_field_name("body") {
+            let sig_bytes = &self.source.as_bytes()[node.start_byte()..body.start_byte()];
+            std::str::from_utf8(sig_bytes)
+                .unwrap_or("")
+                .trim_end_matches(|c: char| c.is_whitespace() || c == '{')
+                .trim()
+                .to_owned()
+        } else {
+            self.node_text(node).trim().to_owned()
+        }
     }
 }
 

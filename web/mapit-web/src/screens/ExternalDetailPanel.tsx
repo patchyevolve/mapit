@@ -31,8 +31,12 @@ export function ExternalDetailPanel() {
 
   if (!nodeId) return null;
 
-  const node = (state.allNodes.get(nodeId) || fetchedNode) as ExternalNode | undefined;
-  if (!node) return <div className="p-4 text-mapit-muted">Loading…</div>;
+  const raw = state.allNodes.get(nodeId) || fetchedNode;
+  if (!raw) return <div className="p-4 text-mapit-muted">Loading…</div>;
+  if (raw.type !== "external") {
+    return <div className="p-4 text-mapit-muted">Node is not an external reference.</div>;
+  }
+  const node = raw as ExternalNode;
 
   return (
     <div className="w-96 bg-mapit-surface border-l border-mapit-border h-full overflow-y-auto shadow-xl">

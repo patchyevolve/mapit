@@ -231,6 +231,33 @@ impl<'a> CfgExtractor<'a> {
     // -------------------------------------------------------------------------
     // If/else handler — creates branch block
     // -------------------------------------------------------------------------
+    /// Wire the exit blocks of a body subgraph to a merge block.
+    /// Exit blocks are those with empty `next_blocks` — they are the terminal
+    /// blocks of the body's subgraph.  For simple sequential bodies this is
+    /// the body block itself; for nested control flow it is the inner merge
+    /// block(s).
+    fn wire_exits_to_merge(
+        &mut self,
+        body_block: &mut ControlFlowBlock,
+        before_body_len: usize,
+        merge_id: &str,
+    ) {
+        if body_block.next_blocks.is_empty() {
+            body_block.next_blocks.push(BlockTransition {
+                block_id: merge_id.to_owned(),
+                condition: None,
+            });
+        }
+        for b in &mut self.blocks[before_body_len..] {
+            if b.next_blocks.is_empty() {
+                b.next_blocks.push(BlockTransition {
+                    block_id: merge_id.to_owned(),
+                    condition: None,
+                });
+            }
+        }
+    }
+
     fn handle_if(
         &mut self,
         node: Node,
@@ -252,6 +279,7 @@ impl<'a> CfgExtractor<'a> {
         // Visit the then-body — resolve body node before any mutable borrow
         let then_body = node.child_by_field_name("consequence")
             .or_else(|| find_compound_child(node));
+        let before_then = self.blocks.len();
         if let Some(body) = then_body {
             self.visit_block_children(body, &mut then_block, source, lang);
         }
@@ -266,6 +294,7 @@ impl<'a> CfgExtractor<'a> {
         };
 
         // Visit the else-body if present
+        let before_else = self.blocks.len();
         let has_else = if let Some(alt) = node.child_by_field_name("alternative") {
             self.visit_block_children(alt, &mut else_block, source, lang);
             true
@@ -282,16 +311,9 @@ impl<'a> CfgExtractor<'a> {
             next_blocks: Vec::new(),
         };
 
-        // Wire then → merge
-        then_block.next_blocks.push(BlockTransition {
-            block_id: merge_id.clone(),
-            condition: None,
-        });
-        // Wire else → merge
-        else_block.next_blocks.push(BlockTransition {
-            block_id: merge_id.clone(),
-            condition: None,
-        });
+        // Wire exit blocks of each body → merge (not the entry blocks)
+        self.wire_exits_to_merge(&mut then_block, before_then, &merge_id);
+        self.wire_exits_to_merge(&mut else_block, before_else, &merge_id);
 
         // Make the current (pre-if) block a Branch that points to then + else
         current_block.kind = BlockKind::Branch;
@@ -367,13 +389,20 @@ impl<'a> CfgExtractor<'a> {
             }
         }
 
-        let merge_block = ControlFlowBlock {
-            id: merge_id,
-            kind: BlockKind::Sequential,
-            calls_in_block: Vec::new(),
-            next_blocks: Vec::new(),
-        };
-        self.push_block(merge_block);
+        // Push completed current_block as a branch block, then repurpose
+        // it as the merge block so subsequent statements go into merge.
+        let old_calls = std::mem::take(&mut current_block.calls_in_block);
+        let old_next = std::mem::take(&mut current_block.next_blocks);
+        let old_kind = current_block.kind.clone();
+        let old_id = current_block.id.clone();
+        self.push_block(ControlFlowBlock {
+            id: old_id,
+            kind: old_kind,
+            calls_in_block: old_calls,
+            next_blocks: old_next,
+        });
+        current_block.id = merge_id;
+        current_block.kind = BlockKind::Sequential;
     }
 
     // -------------------------------------------------------------------------
@@ -434,7 +463,6 @@ impl<'a> CfgExtractor<'a> {
             condition: condition.map(|c| format!("exit: not ({c})")),
         });
 
-        current_block.kind = BlockKind::Loop;
         current_block.next_blocks.push(BlockTransition {
             block_id: loop_id,
             condition: None,
@@ -464,55 +492,54 @@ impl<'a> CfgExtractor<'a> {
 
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
-            let mut case_block: Option<ControlFlowBlock> = None;
-            let mut case_label = "default".to_owned();
+            let mut case_blocks: Vec<(String, ControlFlowBlock)> = Vec::new();
 
             for child in body.children(&mut cursor) {
                 match child.kind() {
                     "case_statement" => {
-                        // Flush previous case block
-                        if let Some(mut blk) = case_block.take() {
-                            blk.next_blocks.push(BlockTransition {
-                                block_id: merge_id.clone(),
-                                condition: None,
-                            });
-                            let id = blk.id.clone();
-                            current_block.next_blocks.push(BlockTransition {
-                                block_id: id,
-                                condition: Some(format!("case {case_label}")),
-                            });
-                            self.push_block(blk);
-                        }
-                        case_label = child
+                        let current_case_label = child
                             .child_by_field_name("value")
                             .map(|n| self.node_text(n, source).to_owned())
                             .unwrap_or_else(|| "?".to_owned());
                         let id = self.new_block_id();
-                        case_block = Some(ControlFlowBlock {
+                        case_blocks.push((current_case_label.clone(), ControlFlowBlock {
                             id,
                             kind: BlockKind::Sequential,
                             calls_in_block: Vec::new(),
                             next_blocks: Vec::new(),
-                        });
+                        }));
                     }
                     _ => {
-                        if let Some(ref mut blk) = case_block {
+                        if let Some((_, ref mut blk)) = case_blocks.last_mut() {
                             self.visit_stmt(child, blk, source, lang);
                         }
                     }
                 }
             }
-            // Flush last case
-            if let Some(mut blk) = case_block.take() {
-                blk.next_blocks.push(BlockTransition {
-                    block_id: merge_id.clone(),
+
+            // Wire case blocks with fallthrough: case_i → case_{i+1}, last → merge
+            for i in 0..case_blocks.len() {
+                let next_id = if i + 1 < case_blocks.len() {
+                    case_blocks[i + 1].1.id.clone()
+                } else {
+                    merge_id.clone()
+                };
+                case_blocks[i].1.next_blocks.push(BlockTransition {
+                    block_id: next_id,
                     condition: None,
                 });
-                let id = blk.id.clone();
+            }
+
+            // Wire current_block (Branch) → each case block
+            for (label, blk) in &case_blocks {
                 current_block.next_blocks.push(BlockTransition {
-                    block_id: id,
-                    condition: Some(format!("case {case_label}")),
+                    block_id: blk.id.clone(),
+                    condition: Some(format!("case {label}")),
                 });
+            }
+
+            // Push all case blocks
+            for (_, blk) in case_blocks {
                 self.push_block(blk);
             }
         }
@@ -545,7 +572,13 @@ impl<'a> CfgExtractor<'a> {
                 if !name.is_empty() {
                     out.push((name, node.start_position().row as u32 + 1));
                 }
-                // Still recurse into arguments — nested calls
+                // Recurse into both function and arguments for nested calls
+                if let Some(func) = node.child_by_field_name("function") {
+                    let mut cursor = func.walk();
+                    for child in func.children(&mut cursor) {
+                        self.collect_calls(child, source, out);
+                    }
+                }
                 if let Some(args) = node.child_by_field_name("arguments") {
                     let mut cursor = args.walk();
                     for child in args.children(&mut cursor) {

@@ -1,0 +1,19 @@
+You are analyzing source code. Below is a file containing multiple functions/symbols.
+For EACH symbol listed, write a one-sentence summary explaining what it does and why it exists.
+
+Project context:
+{{project_overview}}
+
+File: {{file_path}}
+Language: {{language}}
+
+Symbols in this file:
+{{symbols}}
+
+Respond with a JSON object containing an array of summaries — one entry per symbol in the same order:
+{
+  "summaries": [
+    {"name": "exact_symbol_name_1", "summary": "one sentence explanation"},
+    {"name": "exact_symbol_name_2", "summary": "one sentence explanation"}
+  ]
+}

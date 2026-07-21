@@ -1,0 +1,93 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release"
+        required: true
+
+jobs:
+  dist:
+    name: Build and package
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --package mapit-cli
+
+      - name: Package binary
+        shell: bash
+        run: |
+          BINARY_NAME="mapit"
+          if [[ "${{ matrix.target }}" == *-windows-* ]]; then BINARY_NAME="mapit.exe"; fi
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/$BINARY_NAME" "dist/$BINARY_NAME"
+
+      - name: Create archive
+        shell: bash
+        run: |
+          cd dist
+          ARCHIVE_NAME="mapit-${{ matrix.target }}"
+          if [[ "${{ matrix.target }}" == *-windows-* ]]; then
+            7z a "../${ARCHIVE_NAME}.zip" mapit.exe
+          else
+            tar czf "../${ARCHIVE_NAME}.tar.gz" mapit
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapit-${{ matrix.target }}
+          path: dist/
+
+  release:
+    name: Create release
+    needs: dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sh -c 'sha256sum "$1" >> ../checksums.txt' _ {} \;
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            checksums.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true

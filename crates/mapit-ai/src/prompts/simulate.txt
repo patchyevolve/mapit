@@ -1,0 +1,34 @@
+You are simulating the runtime behavior of {{level}} `{{name}}` in a software project.
+Use the context below to describe exactly what happens when this code executes.
+
+Project context: {{project_overview}}
+
+{{context}}
+
+Describe the complete execution behavior with PROPER INPUT/OUTPUT from BOTH the user perspective and the system perspective:
+
+1. ENTRY — How does execution reach this? Who triggers it?
+2. INPUTS — What comes in? From the USER (CLI args, config files, HTTP requests) and from the SYSTEM (database, other functions, environment)?
+3. STEPS — Step by step execution. For each sub-call, say what data flows in and what comes back.
+4. OUTPUTS — What comes out? To the USER (stdout, UI, response) and to the SYSTEM (database writes, file changes, state)?
+5. EXIT — Where does control go after this finishes?
+6. ERRORS — What can fail? What does the user see? What does the system do?
+
+Respond ONLY with valid JSON:
+{
+  "summary": "one sentence summary of the entire simulation",
+  "entry": "how execution reaches this point",
+  "inputs": [
+    {"name": "...", "type": "...", "from_user": "user-provided value and format", "from_system": "system-provided value and source"}
+  ],
+  "steps": [
+    {"order": 1, "action": "..." , "detail": "data flow: what goes in, what happens, what comes out"}
+  ],
+  "outputs": [
+    {"name": "...", "type": "...", "to_user": "what the user sees/receives", "to_system": "what the system stores/changes", "side_effects": "side effects like file writes, network calls"}
+  ],
+  "exit": "where control goes after",
+  "errors": [
+    {"condition": "failure scenario", "result": "what user sees and system does"}
+  ]
+}

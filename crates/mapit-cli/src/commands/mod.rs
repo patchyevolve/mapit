@@ -9,5 +9,6 @@ pub mod init;
 pub mod map;
 pub mod open;
 pub mod projects;
+pub mod simulate;
 pub mod status;
 pub mod trace;

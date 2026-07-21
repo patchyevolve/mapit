@@ -73,7 +73,10 @@ fn select_provider() -> Result<String> {
         print!("Enter choice [1-5]: ");
         stdout.flush()?;
         let mut input = String::new();
-        stdin.lock().read_line(&mut input)?;
+        if stdin.lock().read_line(&mut input)? == 0 || input.trim().is_empty() {
+            println!("No input provided. Skipping AI setup.");
+            return Ok("skip".to_owned());
+        }
         match input.trim() {
             "1" => return Ok("ollama".to_owned()),
             "2" => return Ok("openrouter".to_owned()),
@@ -246,7 +249,6 @@ fn setup_openai_compatible(config_dir: &std::path::Path, provider_name: &str) ->
     let cfg = GlobalConfig {
         default_provider: "openai-compatible".to_owned(),
         default_model: model.clone(),
-        ollama_base_url: base_url.clone(),
         ..Default::default()
     };
     config::save_global_config(config_dir, &cfg)?;

@@ -30,6 +30,7 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "target",
     "dist",
     "build",
+    "embedded_dist",
     "__pycache__",
     "venv",
     ".venv",
@@ -45,24 +46,52 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
 /// Files whose extension maps to no supported language are skipped silently
 /// (they are not surfaced as errors — unknown file types degrade to "not
 /// analyzed" per TRD §4.4).
+fn is_ignored(path: &Path, root: &Path, extra_ignores: &[String]) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let relative_str = relative.to_string_lossy();
+    for pat in DEFAULT_IGNORE_PATTERNS {
+        if glob_match(pat, &relative_str) {
+            return true;
+        }
+    }
+    for pat in extra_ignores {
+        if glob_match(pat, &relative_str) {
+            return true;
+        }
+    }
+    false
+}
+
+fn glob_match(pattern: &str, path: &str) -> bool {
+    // Directory name patterns like "node_modules", "target" etc.
+    // Match if path == pattern (exact match for the dir itself)
+    // or starts_with pattern/ (file directly inside the dir)
+    // or contains /pattern/ (file nested deeper)
+    if !pattern.contains('*') && !pattern.contains('?') {
+        let p = pattern.trim_end_matches('/');
+        return path == p || path.starts_with(&format!("{p}/")) || path.contains(&format!("/{p}/"))
+    }
+    // Glob patterns like "*.min.js", "*.generated.*"
+    // Use the glob crate for proper matching
+    let pat = pattern.trim_end_matches('/');
+    let g = glob::Pattern::new(pat);
+    match g {
+        Ok(g) => g.matches(path),
+        Err(_) => false,
+    }
+}
+
 pub fn walk(root: &Path, extra_ignores: &[String]) -> Result<Vec<SourceFile>> {
+    let root_owned = root.to_path_buf();
+    let extra = extra_ignores.to_vec();
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false) // don't skip hidden files by default (kernel headers etc.)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
-        .follow_links(false);
-
-    // Add default ignore patterns
-    let mut overrides = ignore::overrides::OverrideBuilder::new(root);
-    for pat in DEFAULT_IGNORE_PATTERNS {
-        overrides.add(&format!("!{pat}"))?;
-    }
-    for pat in extra_ignores {
-        overrides.add(&format!("!{pat}"))?;
-    }
-    builder.overrides(overrides.build()?);
+        .follow_links(false)
+        .filter_entry(move |entry| !is_ignored(entry.path(), &root_owned, &extra));
 
     let mut files = Vec::new();
 

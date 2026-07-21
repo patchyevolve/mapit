@@ -127,6 +127,23 @@ function FileView() {
                 </span>
               ))}
             </div>
+            <button
+              type="button"
+              className="flex-shrink-0 px-3 py-1.5 text-xs rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:border-mapit-accent/60 hover:bg-mapit-surface transition-colors focus:ring-2 focus:ring-mapit-accent focus:outline-none flex items-center gap-1.5 font-medium"
+              onClick={() =>
+                dispatch({
+                  type: "SET_OVERLAY",
+                  overlay: {
+                    kind: "file_simulation",
+                    file_path: file.file_path ?? "",
+                    title: file.name,
+                  },
+                })
+              }
+            >
+              <span>🎬</span>
+              <span>Simulate file</span>
+            </button>
           </div>
         </div>
         {/* Search within file */}
@@ -294,6 +311,25 @@ function FeatureView() {
               {filtered.length} files
             </p>
           </div>
+          {featureNode?.type === "feature" && (
+            <button
+              type="button"
+              className="flex-shrink-0 px-3 py-1.5 text-xs rounded bg-mapit-surface2 border border-mapit-border text-mapit-text hover:border-mapit-accent/60 hover:bg-mapit-surface transition-colors focus:ring-2 focus:ring-mapit-accent focus:outline-none flex items-center gap-1.5 font-medium"
+              onClick={() =>
+                dispatch({
+                  type: "SET_OVERLAY",
+                  overlay: {
+                    kind: "feature_simulation",
+                    node_id: featureNode.id,
+                    title: featureNode.name,
+                  },
+                })
+              }
+            >
+              <span>🎬</span>
+              <span>Simulate subsystem</span>
+            </button>
+          )}
         </div>
         <input
           type="text"
@@ -763,9 +799,27 @@ function FileBrowser() {
                 <span className="text-sm font-mono text-mapit-muted">
                   {dir || "/ (root)"}
                 </span>
-                <span className="text-xs text-mapit-muted ml-auto">
+                <span className="text-xs text-mapit-muted">
                   {files.length} files
                 </span>
+                <button
+                  type="button"
+                  className="ml-2 text-xs text-mapit-accent hover:text-mapit-text transition-colors flex items-center gap-1 px-2 py-0.5 rounded hover:bg-mapit-surface2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({
+                      type: "SET_OVERLAY",
+                      overlay: {
+                        kind: "module_simulation",
+                        path: dir ? dir + "/" : "",
+                        title: dir || "root",
+                      },
+                    });
+                  }}
+                  title="Simulate execution across all files in this module"
+                >
+                  🎬 Simulate
+                </button>
               </button>
               {expandedDirs.has(dir) && (
                 <div className="divide-y divide-mapit-border/50">
@@ -995,10 +1049,19 @@ export function SystemOverview() {
             {state.project.ai_annotation_coverage_pct.toFixed(0)}% AI coverage
           </span>
         )}
+        <button
+          type="button"
+          className="flex items-center gap-1 text-mapit-accent hover:text-mapit-text transition-colors ml-auto"
+          onClick={() =>
+            dispatch({ type: "SET_OVERLAY", overlay: { kind: "project_simulation" } })
+          }
+        >
+          🎬 Simulate project
+        </button>
         {state.flaws.length > 0 && (
           <button
             type="button"
-            className="ml-auto flex items-center gap-1 text-mapit-danger hover:text-mapit-text transition-colors"
+            className="flex items-center gap-1 text-mapit-danger hover:text-mapit-text transition-colors"
             onClick={() =>
               dispatch({ type: "SET_SCREEN", screen: "flaws_report" })
             }

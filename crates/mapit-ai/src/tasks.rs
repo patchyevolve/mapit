@@ -2,7 +2,7 @@
 //! Each task: builds prompt → calls provider → parses response → retries once on failure.
 
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 use crate::prompts;
@@ -68,7 +68,152 @@ pub fn summarize(
 }
 
 // ---------------------------------------------------------------------------
-// Task 2: Classify
+// Task 2: Batch summarize (all functions in a file in one call)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct BatchSummarizeOutput {
+    pub summaries: Vec<BatchSummaryEntry>,
+}
+
+#[derive(Deserialize)]
+pub struct BatchSummaryEntry {
+    pub name: String,
+    pub summary: String,
+}
+
+/// Summarize all functions/symbols in a file in a single AI call.
+/// `symbol_descs` is one string per symbol (pre-formatted with name, signature, callers, callees).
+pub fn summarize_batch(
+    provider: &dyn AiProvider,
+    model: &str,
+    file_path: &str,
+    language: &str,
+    project_overview: Option<&str>,
+    symbol_descs: &[String],
+) -> Result<BatchSummarizeOutput> {
+    let pv = project_overview.unwrap_or("(no project overview available)");
+    let user_prompt = prompts::SUMMARIZE_BATCH
+        .replace("{{project_overview}}", pv)
+        .replace("{{file_path}}", file_path)
+        .replace("{{language}}", language)
+        .replace("{{symbols}}", &symbol_descs.join("\n\n"));
+
+    let request = AiRequest {
+        model: model.to_owned(),
+        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
+        user_prompt,
+        expect_json: true,
+    };
+
+    let response = try_complete(provider, &request)?;
+    match parse_json::<BatchSummarizeOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(_) => {
+            let raw = response.content.trim().to_string();
+            if raw.len() > 10 {
+                // Try line-based fallback: "name: summary" per line
+                let mut summaries = Vec::new();
+                for line in raw.lines() {
+                    if let Some((name, summary)) = line.split_once(':') {
+                        summaries.push(BatchSummaryEntry {
+                            name: name.trim().to_owned(),
+                            summary: summary.trim().to_owned(),
+                        });
+                    }
+                }
+                if !summaries.is_empty() {
+                    return Ok(BatchSummarizeOutput { summaries });
+                }
+            }
+            anyhow::bail!("summarize_batch: could not parse response")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 3: Project overview (run once per annotation pass)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct ProjectOverviewOutput {
+    pub overview: String,
+}
+
+/// Get a high-level project overview that provides system context for all
+/// per-function summaries. Single AI call, reused across all batch prompts.
+pub fn summarize_project(
+    provider: &dyn AiProvider,
+    model: &str,
+    file_tree: &str,
+    entry_points: &str,
+    public_symbols: &str,
+) -> Result<ProjectOverviewOutput> {
+    let user_prompt = prompts::PROJECT_OVERVIEW
+        .replace("{{file_tree}}", file_tree)
+        .replace("{{entry_points}}", entry_points)
+        .replace("{{public_symbols}}", public_symbols);
+
+    let request = AiRequest {
+        model: model.to_owned(),
+        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
+        user_prompt,
+        expect_json: true,
+    };
+
+    let response = try_complete(provider, &request)?;
+    match parse_json::<ProjectOverviewOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(_) => {
+            let raw = response.content.trim().to_string();
+            if raw.len() > 10 {
+                Ok(ProjectOverviewOutput { overview: raw })
+            } else {
+                anyhow::bail!("project_overview: response too short")
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 4: Summarize file
+// ---------------------------------------------------------------------------
+
+pub fn summarize_file(
+    provider: &dyn AiProvider,
+    model: &str,
+    file_path: &str,
+    language: &str,
+    symbol_summaries: &[String],
+) -> Result<SummarizeOutput> {
+    let user_prompt = prompts::SUMMARIZE_FILE
+        .replace("{{file_path}}", file_path)
+        .replace("{{language}}", language)
+        .replace("{{symbols_summaries}}", &symbol_summaries.join("\n"));
+
+    let request = AiRequest {
+        model: model.to_owned(),
+        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
+        user_prompt,
+        expect_json: true,
+    };
+
+    let response = try_complete(provider, &request)?;
+    match parse_json::<SummarizeOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(_) => {
+            let raw = response.content.trim().to_string();
+            if raw.len() > 5 {
+                Ok(SummarizeOutput { summary: raw })
+            } else {
+                anyhow::bail!("summarize_file: response too short to use as summary")
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 3: Classify
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -176,7 +321,53 @@ pub fn flag_flaws(
 }
 
 // ---------------------------------------------------------------------------
-// Task 4: Answer
+// Task 5: Batch flag flaws (all functions in a file in one call)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct BatchFlagFlawsOutput {
+    /// Flaws keyed by function name
+    pub flaws: std::collections::HashMap<String, Vec<Flaw>>,
+}
+
+/// Analyze all functions in a file for flaws in a single AI call.
+/// `func_descs` is one string per function (pre-formatted with name, source, structural info).
+pub fn flag_flaws_batch(
+    provider: &dyn AiProvider,
+    model: &str,
+    file_path: &str,
+    language: &str,
+    project_overview: Option<&str>,
+    func_descs: &[String],
+) -> Result<BatchFlagFlawsOutput> {
+    let pv = project_overview.unwrap_or("(no project overview available)");
+    let user_prompt = prompts::FLAW_FLAGS_BATCH
+        .replace("{{project_overview}}", pv)
+        .replace("{{file_path}}", file_path)
+        .replace("{{language}}", language)
+        .replace("{{functions}}", &func_descs.join("\n\n"));
+
+    let request = AiRequest {
+        model: model.to_owned(),
+        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
+        user_prompt,
+        expect_json: true,
+    };
+
+    let response = try_complete(provider, &request)?;
+    match parse_json::<BatchFlagFlawsOutput>(&response.content) {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            error!("flag_flaws_batch parse failed (returning empty): {e:#}");
+            Ok(BatchFlagFlawsOutput {
+                flaws: std::collections::HashMap::new(),
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 6: Answer
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -194,6 +385,90 @@ pub fn answer(
     let user_prompt = prompts::ANSWER
         .replace("{{context}}", context)
         .replace("{{question}}", question);
+
+    let request = AiRequest {
+        model: model.to_owned(),
+        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
+        user_prompt,
+        expect_json: true,
+    };
+
+    let response = try_complete(provider, &request)?;
+    parse_json(&response.content)
+}
+
+// ---------------------------------------------------------------------------
+// Task 7: Simulate (function/file/module/project execution behavior)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, Serialize)]
+pub struct SimulateOutput {
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub entry: String,
+    #[serde(default)]
+    pub inputs: Vec<SimulateIO>,
+    #[serde(default)]
+    pub steps: Vec<SimulateStep>,
+    #[serde(default)]
+    pub outputs: Vec<SimulateIO>,
+    #[serde(default)]
+    pub exit: String,
+    #[serde(default)]
+    pub errors: Vec<SimulateError>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct SimulateIO {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub io_type: String,
+    #[serde(default)]
+    pub from_user: String,
+    #[serde(default)]
+    pub from_system: String,
+    #[serde(default)]
+    pub to_user: String,
+    #[serde(default)]
+    pub to_system: String,
+    #[serde(default)]
+    pub side_effects: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct SimulateStep {
+    pub order: u32,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct SimulateError {
+    #[serde(default)]
+    pub condition: String,
+    #[serde(default)]
+    pub result: String,
+}
+
+/// Simulate runtime behavior of a symbol at any level (function/file/module/project).
+/// `context` contains pre-formatted structural data appropriate for the level.
+pub fn simulate(
+    provider: &dyn AiProvider,
+    model: &str,
+    level: &str,
+    name: &str,
+    project_overview: Option<&str>,
+    context: &str,
+) -> Result<SimulateOutput> {
+    let pv = project_overview.unwrap_or("(no project overview)");
+    let user_prompt = prompts::SIMULATE
+        .replace("{{level}}", level)
+        .replace("{{name}}", name)
+        .replace("{{project_overview}}", pv)
+        .replace("{{context}}", context);
 
     let request = AiRequest {
         model: model.to_owned(),

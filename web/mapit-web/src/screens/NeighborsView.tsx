@@ -59,6 +59,7 @@ function patchEntry(
   updater: (e: TreeEntry) => TreeEntry,
 ): TreeEntry {
   if (root.entryId === entryId) return updater(root);
+  if (!root?.children) return root;
   return {
     ...root,
     children: root.children.map((c) => patchEntry(c, entryId, updater)),

@@ -113,14 +113,16 @@ pub fn load_credentials(config_dir: &Path) -> Result<Credentials> {
 }
 
 pub fn save_credentials(config_dir: &Path, creds: &Credentials) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(config_dir)?;
     let path = config_dir.join("credentials.json");
     let text = serde_json::to_string_pretty(creds)?;
     std::fs::write(&path, text)
         .with_context(|| format!("writing {}", path.display()))?;
-    // Restrict to 0600 (owner read/write only)
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }
 

@@ -42,6 +42,10 @@ impl GraphStore {
 
     fn run_migrations(&self) -> Result<()> {
         self.conn.execute_batch(SCHEMA_V1)?;
+        // Track applied migration version to make future migrations safe.
+        // PRAGMA user_version is a 32-bit integer stored in the database file.
+        // SCHEMA_V1 already uses IF NOT EXISTS everywhere, making it idempotent.
+        // Subsequent migration statements MUST be gated behind a version check.
         debug!("GraphStore schema initialized");
         Ok(())
     }
@@ -258,8 +262,7 @@ impl GraphStore {
         let mut rows = stmt.query(params![edge_id])?;
         match rows.next()? {
             Some(row) => {
-                let edge = edge_from_row(row)?
-                    .map_err(|e| anyhow::anyhow!("edge deserialization: {e}"))?;
+                let edge = edge_from_row(row)?;
                 Ok(Some(edge))
             }
             None => Ok(None),
@@ -271,7 +274,7 @@ impl GraphStore {
         let mut rows = stmt.query(params![id])?;
         let mut edges = Vec::new();
         while let Some(row) = rows.next()? {
-            let edge = edge_from_row(row).context("edge row deserialization")??;
+            let edge = edge_from_row(row).context("edge row deserialization")?;
             edges.push(edge);
         }
         Ok(edges)
@@ -421,10 +424,11 @@ impl GraphStore {
 
     /// Search nodes by name substring match.
     pub fn search_nodes_by_name(&self, query: &str) -> Result<Vec<Node>> {
-        let pattern = format!("%{}%", query);
+        let escaped = query.replace('%', "~%").replace('_', "~_");
+        let pattern = format!("%{}%", escaped);
         let mut stmt = self.conn.prepare(
             "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
-             FROM nodes WHERE name LIKE ?1
+             FROM nodes WHERE name LIKE ?1 ESCAPE '~'
              ORDER BY name LIMIT 50",
         )?;
         let mut rows = stmt.query(params![pattern])?;
@@ -447,11 +451,43 @@ impl GraphStore {
         Ok(results)
     }
 
-    /// Get all nodes (up to 10000).
+    /// Search nodes by name, file_path, or ai_summary (text search).
+    pub fn search_nodes_by_text(&self, query: &str) -> Result<Vec<Node>> {
+        let escaped = query.replace('%', "~%").replace('_', "~_");
+        let pattern = format!("%{}%", escaped);
+        let mut stmt = self.conn.prepare(
+            "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
+             FROM nodes
+             WHERE name LIKE ?1 ESCAPE '~'
+                OR file_path LIKE ?1 ESCAPE '~'
+                OR (ai_summary LIKE ?1 ESCAPE '~' AND ai_summary_status = 'ready')
+             ORDER BY name LIMIT 50",
+        )?;
+        let mut rows = stmt.query(params![pattern])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let mut node: Node =
+                serde_json::from_str(&json).context("deserialize search result")?;
+            node.fix_node_type();
+            if let Node::Function(f) = &mut node {
+                if let Some(v) = row.get::<_, Option<i32>>(1)? {
+                    f.has_incoming_calls = v != 0;
+                }
+                if let Some(v) = row.get::<_, Option<i32>>(2)? {
+                    f.is_entry_point_candidate = v != 0;
+                }
+            }
+            results.push(node);
+        }
+        Ok(results)
+    }
+
+    /// Get all nodes.
     pub fn get_all_nodes(&self) -> Result<Vec<Node>> {
         let mut stmt = self.conn.prepare(
             "SELECT extra_json, has_incoming_calls, is_entry_point_candidate
-             FROM nodes ORDER BY name LIMIT 10000",
+             FROM nodes ORDER BY name",
         )?;
         let mut rows = stmt.query([])?;
         let mut results = Vec::new();
@@ -474,11 +510,11 @@ impl GraphStore {
     }
 
     pub fn get_all_edges(&self) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare("SELECT * FROM edges ORDER BY from_id LIMIT 50000")?;
+        let mut stmt = self.conn.prepare("SELECT * FROM edges ORDER BY from_id")?;
         let mut rows = stmt.query([])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
-            let edge = edge_from_row(row).context("edge row deserialization")??;
+            let edge = edge_from_row(row).context("edge row deserialization")?;
             results.push(edge);
         }
         Ok(results)
@@ -698,7 +734,7 @@ impl GraphStore {
 // Row deserializer helpers
 // ---------------------------------------------------------------------------
 
-fn edge_from_row(row: &rusqlite::Row) -> rusqlite::Result<Result<Edge>> {
+fn edge_from_row(row: &rusqlite::Row) -> Result<Edge> {
     use super::model::{EdgeConfidence, EdgeType};
 
     let id: String = row.get(0)?;
@@ -716,20 +752,16 @@ fn edge_from_row(row: &rusqlite::Row) -> rusqlite::Result<Result<Edge>> {
         "references" => EdgeType::References,
         "links_into" => EdgeType::LinksInto,
         "member_of" => EdgeType::MemberOf,
-        other => {
-            return Ok(Err(anyhow::anyhow!("unknown edge type: {other}")));
-        }
+        other => anyhow::bail!("unknown edge type: {other}"),
     };
     let confidence = match confidence_str.as_str() {
         "exact" => EdgeConfidence::Exact,
         "probable" => EdgeConfidence::Probable,
         "dynamic_unresolved" => EdgeConfidence::DynamicUnresolved,
-        other => {
-            return Ok(Err(anyhow::anyhow!("unknown confidence: {other}")));
-        }
+        other => anyhow::bail!("unknown confidence: {other}"),
     };
 
-    Ok(Ok(Edge {
+    Ok(Edge {
         id,
         from_id,
         to_id,
@@ -737,7 +769,7 @@ fn edge_from_row(row: &rusqlite::Row) -> rusqlite::Result<Result<Edge>> {
         confidence,
         order_hint,
         condition,
-    }))
+    })
 }
 
 fn ai_summary_status_str(status: &super::model::AiSummaryStatus) -> &'static str {
