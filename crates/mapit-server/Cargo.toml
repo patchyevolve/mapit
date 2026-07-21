@@ -1,7 +1,13 @@
 [package]
 name = "mapit-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Web server backend for the mapit codebase mapper — REST API + WebSocket"
+license = "MIT"
+repository = "https://github.com/patchyevolve/mapit"
+homepage = "https://github.com/patchyevolve/mapit"
+keywords = ["codebase", "web-server", "code-analysis"]
+categories = ["development-tools", "web-programming"]
 
 [dependencies]
 anyhow = { workspace = true }

@@ -13,29 +13,31 @@ fn main() {
     let embed_dir = manifest_dir.join("embedded_dist");
 
     // If embedded_dist already exists, skip the npm build
-    // (CI pre-builds the frontend before cargo build)
-    if embed_dir.exists() && embed_dir.read_dir().map(|mut i| i.next().is_some()).unwrap_or(false) {
-        println!("cargo:warning=embedded_dist exists, skipping frontend build");
+    // (committed to git so `cargo install` / `cargo publish` work without npm)
+    if embed_dir.exists() && embed_dir.join("index.html").exists() {
+        println!("cargo:warning=embedded_dist/index.html found, skipping frontend build");
         return;
     }
 
-    // Try to build the frontend - don't hard-fail if npm is unavailable
+    // Try to build the frontend
     let src = web_dir.join("dist");
-    if let Ok(status) = std::process::Command::new("npm")
+    match std::process::Command::new("npm")
         .args(["run", "build"])
         .current_dir(&web_dir)
         .status()
     {
-        if status.success() && src.exists() {
+        Ok(status) if status.success() && src.exists() => {
             if embed_dir.exists() {
                 fs::remove_dir_all(&embed_dir).unwrap();
             }
             cp_dir(&src, &embed_dir);
-        } else {
-            panic!("npm build failed");
         }
-    } else {
-        panic!("npm not found — build frontend manually: cd web/mapit-web && npm install && npm run build");
+        Ok(_) => panic!("npm build failed"),
+        Err(_) => panic!(
+            "npm not found and embedded_dist/index.html missing.\n\
+             Build the frontend: cd web/mapit-web && npm install && npm run build\n\
+             Or restore embedded_dist from git: git checkout crates/mapit-server/embedded_dist"
+        ),
     }
 
     // Tell cargo to re-run if web source files change

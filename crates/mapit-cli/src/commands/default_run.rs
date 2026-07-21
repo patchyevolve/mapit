@@ -203,6 +203,20 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
 
     show_splash();
 
+    // Guard: refuse to run in home directory — too many files, risk of leaking
+    // personal data into AI enrichment.
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() {
+        let home_path = std::path::Path::new(&home).canonicalize().unwrap_or_default();
+        let target_canon = target.canonicalize().unwrap_or_else(|_| target.to_path_buf());
+        if target_canon == home_path {
+            println!("\x1b[31m✗ Refusing to run in your home directory.\x1b[0m");
+            println!("  mapit would scan all files under \x1b[33m{}\x1b[0m, which is unsafe.", home);
+            println!("  Run \x1b[33mmapit --path /path/to/project\x1b[0m inside a real project directory.");
+            return Ok(());
+        }
+    }
+
     // Pre-check: does this directory have any supported source files?
     let source_files = mapit_core::walker::walk(target, &[])?;
     if source_files.is_empty() {
