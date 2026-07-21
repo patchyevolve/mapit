@@ -208,6 +208,53 @@ impl<'a> PythonExtractor<'a> {
         }
     }
 
+    fn extract_enclosing_condition(&self, mut node: Node) -> Option<String> {
+        loop {
+            node = node.parent()?;
+            match node.kind() {
+                "if_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                    return None;
+                }
+                "while_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("while {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "for_statement" => {
+                    let left = node.child_by_field_name("left")
+                        .map(|n| self.node_text(n).to_owned()).unwrap_or_default();
+                    let right = node.child_by_field_name("right")
+                        .map(|n| self.node_text(n).to_owned()).unwrap_or_default();
+                    if !left.is_empty() && !right.is_empty() {
+                        return Some(format!("for {left} in {right}"));
+                    }
+                    return None;
+                }
+                "match_statement" | "match_arm" => {
+                    if let Some(pat) = node.child_by_field_name("pattern") {
+                        let text = self.node_text(pat).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("match arm: {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "function_definition" | "async_function_definition" => return None,
+                _ => continue,
+            }
+        }
+    }
+
     fn handle_call(&mut self, node: Node, caller: &str) {
         let func_node = match node.child_by_field_name("function") {
             Some(n) => n,
@@ -233,7 +280,7 @@ impl<'a> PythonExtractor<'a> {
             called_name,
             call_line: node.start_position().row as u32 + 1,
             order_hint: order,
-            condition: None,
+            condition: self.extract_enclosing_condition(node),
         });
     }
 }
@@ -282,5 +329,33 @@ mod tests {
     fn finds_call() {
         let out = extract("def caller():\n    callee()\ndef callee():\n    pass\n");
         assert!(out.references.iter().any(|r| r.called_name == "callee"));
+    }
+
+    #[test]
+    fn extracts_if_condition() {
+        let out = extract("def foo():\n    if x > 0:\n        bar()\n");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("x > 0"));
+    }
+
+    #[test]
+    fn extracts_while_condition() {
+        let out = extract("def foo():\n    while x > 0:\n        bar()\n");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("x > 0"));
+    }
+
+    #[test]
+    fn extracts_for_condition() {
+        let out = extract("def foo():\n    for x in items:\n        bar(x)\n");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("for x in items"));
+    }
+
+    #[test]
+    fn unconditional_call_has_no_condition() {
+        let out = extract("def foo():\n    bar()\n");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
     }
 }

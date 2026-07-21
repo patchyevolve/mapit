@@ -74,8 +74,14 @@ pub async fn run(target: &Path, name: &str) -> Result<()> {
     let callees: Vec<String> = all_out
         .iter()
         .filter(|e| matches!(e.edge_type, EdgeType::Calls))
-        .filter_map(|e| store.get_node(&e.to_id).ok()?)
-        .map(|n| n.base().name.clone())
+        .filter_map(|e| {
+            let n = store.get_node(&e.to_id).ok().flatten()?;
+            let name = n.base().name.clone();
+            match &e.condition {
+                Some(cond) if !cond.is_empty() => Some(format!("{name} (if {cond})")),
+                _ => Some(name),
+            }
+        })
         .collect();
     if callees.is_empty() {
         println!("  Calls    : (none)");

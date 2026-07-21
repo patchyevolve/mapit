@@ -259,6 +259,76 @@ impl<'a> CExtractor<'a> {
         });
     }
 
+    fn extract_enclosing_condition(&self, mut node: Node) -> Option<String> {
+        loop {
+            let child = node;
+            node = node.parent()?;
+            match node.kind() {
+                "if_statement" => {
+                    if let Some(alt) = node.child_by_field_name("alternative") {
+                        if child == alt {
+                            continue;
+                        }
+                    }
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                    return None;
+                }
+                "while_statement" | "do_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("while {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "for_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("for {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "switch_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("switch {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "case_statement" => {
+                    if let Some(val) = node.child_by_field_name("value") {
+                        let text = self.node_text(val).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("case {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "conditional_expression" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("ternary {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "function_definition" => return None,
+                _ => continue,
+            }
+        }
+    }
+
     fn handle_call(&mut self, node: Node, caller: &str) {
         let func_node = match node.child_by_field_name("function") {
             Some(n) => n,
@@ -284,7 +354,7 @@ impl<'a> CExtractor<'a> {
             called_name,
             call_line: node.start_position().row as u32 + 1,
             order_hint: order,
-            condition: None,
+            condition: self.extract_enclosing_condition(node),
         });
     }
 }
@@ -347,5 +417,26 @@ mod tests {
     fn finds_pointer_function() {
         let out = extract("static int *get_ptr(void) { return 0; }");
         assert!(out.definitions.iter().any(|d| d.name == "get_ptr"));
+    }
+
+    #[test]
+    fn extracts_if_condition() {
+        let out = extract("void foo() { if (x > 0) { bar(); } } void bar() {}");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("(x > 0)"));
+    }
+
+    #[test]
+    fn extracts_while_condition() {
+        let out = extract("void foo() { while (x < 5) { bar(); } } void bar() {}");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("x < 5"));
+    }
+
+    #[test]
+    fn unconditional_call_has_no_condition() {
+        let out = extract("void foo() { bar(); } void bar() {}");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
     }
 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 use anyhow::Result;
 use mapit_ai::{
-    provider::{self as ai_provider, AiProvider},
+    provider as ai_provider,
     tasks::{self, SimulateOutput},
 };
 use mapit_core::{

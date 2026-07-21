@@ -425,8 +425,14 @@ fn get_caller_names(store: &GraphStore, node_id: &str) -> Vec<String> {
         Ok(edges) => edges
             .iter()
             .filter(|e| matches!(e.edge_type, mapit_core::graph::model::EdgeType::Calls))
-            .filter_map(|e| store.get_node(&e.from_id).ok().flatten())
-            .map(|n| n.base().name.clone())
+            .filter_map(|e| {
+                let n = store.get_node(&e.from_id).ok().flatten()?;
+                let name = n.base().name.clone();
+                match &e.condition {
+                    Some(cond) if !cond.is_empty() => Some(format!("{name} (if {cond})")),
+                    _ => Some(name),
+                }
+            })
             .collect(),
         Err(_) => vec![],
     }
@@ -437,8 +443,14 @@ fn get_callee_names(store: &GraphStore, node_id: &str) -> Vec<String> {
         Ok(edges) => edges
             .iter()
             .filter(|e| matches!(e.edge_type, mapit_core::graph::model::EdgeType::Calls))
-            .filter_map(|e| store.get_node(&e.to_id).ok().flatten())
-            .map(|n| n.base().name.clone())
+            .filter_map(|e| {
+                let n = store.get_node(&e.to_id).ok().flatten()?;
+                let name = n.base().name.clone();
+                match &e.condition {
+                    Some(cond) if !cond.is_empty() => Some(format!("{name} (if {cond})")),
+                    _ => Some(name),
+                }
+            })
             .collect(),
         Err(_) => vec![],
     }

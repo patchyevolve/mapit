@@ -82,14 +82,14 @@ fn parse_asm(source: &str, output: &mut AdapterOutput) {
             continue;
         }
 
-        if let Some(target) = try_parse_call_or_jump(line) {
+        if let Some((target, condition)) = try_parse_call_or_jump(line) {
             if let Some((ref caller_name, _)) = current_label {
                 output.references.push(SymbolReference {
                     from_qualified_name: caller_name.clone(),
                     called_name: target,
                     call_line: line_no,
                     order_hint: call_order,
-                    condition: None,
+                    condition,
                 });
                 call_order += 1;
             }
@@ -198,9 +198,10 @@ fn try_parse_global_directive(line: &str) -> Option<String> {
     if sym.is_empty() { None } else { Some(sym) }
 }
 
-/// Detects `call target`, `jmp target`, `jne target`, etc.
-/// Returns the target label/symbol name.
-fn try_parse_call_or_jump(line: &str) -> Option<String> {
+/// If the line is a call or jump, returns `Some((target, condition))`.
+/// `condition` is `None` for unconditional jumps and calls,
+/// `Some("je")` / `Some("jne")` etc. for conditional branches.
+fn try_parse_call_or_jump(line: &str) -> Option<(String, Option<String>)> {
     let lower = line.to_ascii_lowercase();
     // All x86 unconditional + conditional branches + calls
     let prefixes = [
@@ -221,7 +222,14 @@ fn try_parse_call_or_jump(line: &str) -> Option<String> {
                 .unwrap_or("")
                 .trim();
             if !target.is_empty() && !target.starts_with('[') {
-                return Some(target.to_owned());
+                let is_conditional = prefix.starts_with('j') && *prefix != "jmp "
+                    && *prefix != "call " && *prefix != "call near " && *prefix != "call far ";
+                let condition = if is_conditional {
+                    Some(prefix.trim().to_owned())
+                } else {
+                    None
+                };
+                return Some((target.to_owned(), condition));
             }
         }
     }
@@ -315,5 +323,29 @@ mod tests {
         let src = "my_fn:  ; this is a function\n  ret\n";
         let out = extract(src);
         assert!(out.definitions.iter().any(|d| d.name == "my_fn"));
+    }
+
+    #[test]
+    fn conditional_jump_has_condition() {
+        let src = "foo:\n  je bar\nbar:\n  ret\n";
+        let out = extract(src);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("je"));
+    }
+
+    #[test]
+    fn unconditional_jmp_has_no_condition() {
+        let src = "foo:\n  jmp bar\nbar:\n  ret\n";
+        let out = extract(src);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
+    }
+
+    #[test]
+    fn call_has_no_condition() {
+        let src = "foo:\n  call bar\nbar:\n  ret\n";
+        let out = extract(src);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
     }
 }

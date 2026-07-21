@@ -281,6 +281,77 @@ impl<'a> JsExtractor<'a> {
         }
     }
 
+    fn extract_enclosing_condition(&self, mut node: Node) -> Option<String> {
+        loop {
+            let child = node;
+            node = node.parent()?;
+            match node.kind() {
+                "if_statement" => {
+                    if let Some(alt) = node.child_by_field_name("alternative") {
+                        if child == alt {
+                            continue;
+                        }
+                    }
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                    return None;
+                }
+                "while_statement" | "do_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("while {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "for_statement" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("for {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "for_in_statement" | "for_of_statement" => {
+                    let left = node.child_by_field_name("left")
+                        .map(|n| self.node_text(n).to_owned()).unwrap_or_default();
+                    let right = node.child_by_field_name("right")
+                        .map(|n| self.node_text(n).to_owned()).unwrap_or_default();
+                    if !left.is_empty() && !right.is_empty() {
+                        return Some(format!("{left} of {right}"));
+                    }
+                    return None;
+                }
+                "switch_case" | "switch_default" => {
+                    if let Some(val) = node.child_by_field_name("value") {
+                        let text = self.node_text(val).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("case {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "ternary_expression" => {
+                    if let Some(cond) = node.child_by_field_name("condition") {
+                        let text = self.node_text(cond).to_owned();
+                        if !text.is_empty() {
+                            return Some(format!("ternary {text}"));
+                        }
+                    }
+                    return None;
+                }
+                "function_declaration" | "arrow_function" | "method_definition" | "generator_function_declaration" => return None,
+                _ => continue,
+            }
+        }
+    }
+
     fn handle_call(&mut self, node: Node, caller: &str) {
         let func_node = match node.child_by_field_name("function") {
             Some(n) => n,
@@ -315,7 +386,7 @@ impl<'a> JsExtractor<'a> {
             called_name,
             call_line: node.start_position().row as u32 + 1,
             order_hint: order,
-            condition: None,
+            condition: self.extract_enclosing_condition(node),
         });
     }
 
@@ -401,5 +472,33 @@ mod tests {
         assert!(out.definitions.iter().any(|d| d.name == "Greeter"));
         let m = out.definitions.iter().find(|d| d.name == "greet").unwrap();
         assert!(m.qualified_name.contains("Greeter"));
+    }
+
+    #[test]
+    fn js_extracts_if_condition() {
+        let out = extract_js("function foo() { if (x > 0) { bar(); } }");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("(x > 0)"));
+    }
+
+    #[test]
+    fn js_extracts_while_condition() {
+        let out = extract_js("function foo() { while (x < 5) { bar(); } }");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("x < 5"));
+    }
+
+    #[test]
+    fn js_extracts_ternary_condition() {
+        let out = extract_js("function foo() { x > 0 ? bar() : baz(); }");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("x > 0"));
+    }
+
+    #[test]
+    fn js_unconditional_call_has_no_condition() {
+        let out = extract_js("function foo() { bar(); }");
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
     }
 }

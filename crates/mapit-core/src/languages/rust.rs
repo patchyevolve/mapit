@@ -305,9 +305,17 @@ impl<'a> CallVisitor<'a> {
 
     fn extract_enclosing_condition(&self, mut node: Node) -> Option<String> {
         loop {
+            let child = node;
             node = node.parent()?;
             match node.kind() {
                 "if_expression" => {
+                    // Check if we're in the `else` branch (alternative)
+                    if let Some(alt) = node.child_by_field_name("alternative") {
+                        if child == alt {
+                            // In else branch — skip this condition, continue up
+                            continue;
+                        }
+                    }
                     if let Some(cond) = node.child_by_field_name("condition") {
                         let text = self.node_text(cond).to_owned();
                         if !text.is_empty() {
@@ -507,5 +515,71 @@ mod tests {
         let out = extract("pub fn exported() {}");
         let f = out.definitions.iter().find(|d| d.name == "exported").unwrap();
         assert!(f.is_entry_point_candidate);
+    }
+
+    #[test]
+    fn extracts_if_condition() {
+        let out = extract(r#"
+            fn foo() {
+                if x > 0 {
+                    bar();
+                }
+            }
+        "#);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("x > 0"));
+    }
+
+    #[test]
+    fn extracts_match_arm_condition() {
+        let out = extract(r#"
+            fn foo(x: u32) {
+                match x {
+                    1 => bar(),
+                    _ => baz(),
+                }
+            }
+        "#);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert_eq!(r.condition.as_deref(), Some("match arm: 1"));
+    }
+
+    #[test]
+    fn extracts_else_no_condition() {
+        let out = extract(r#"
+            fn foo() {
+                if x > 0 {
+                    bar();
+                } else {
+                    baz();
+                }
+            }
+        "#);
+        let r = out.references.iter().find(|r| r.called_name == "baz").unwrap();
+        assert!(r.condition.is_none());
+    }
+
+    #[test]
+    fn extracts_while_condition() {
+        let out = extract(r#"
+            fn foo() {
+                while let Some(x) = opt {
+                    bar(x);
+                }
+            }
+        "#);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.as_deref().unwrap().contains("while"));
+    }
+
+    #[test]
+    fn unconditional_call_has_no_condition() {
+        let out = extract(r#"
+            fn foo() {
+                bar();
+            }
+        "#);
+        let r = out.references.iter().find(|r| r.called_name == "bar").unwrap();
+        assert!(r.condition.is_none());
     }
 }

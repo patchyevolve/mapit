@@ -16,18 +16,15 @@ use tracing::{error, info, warn};
 
 use crate::state::AppState;
 use mapit_ai::{
-    ollama::OllamaProvider,
-    openai_compatible::OpenAiCompatibleProvider,
-    provider::AiProvider,
     tasks::{self, BatchFlagFlawsOutput, BatchSummarizeOutput, SummarizeOutput},
 };
 use mapit_core::graph::model::Node;
 use mapit_core::{
-    config::{load_global_config, load_project_config, save_project_config, GlobalConfig},
+    config::{load_global_config, load_project_config, save_project_config},
     graph::{
         builder::{self, FileInput, ParseResult},
         incremental::{diff_manifest, load_manifest, rebuild_manifest_from_store, save_manifest},
-        model::{self, AiSummaryStatus, EdgeType, FlawBasis, FlawFlag, FlawKind, FlawSeverity},
+        model::{self, AiSummaryStatus, FlawBasis, FlawFlag, FlawKind, FlawSeverity},
         store::GraphStore,
     },
     languages::adapter_for_language,
@@ -1061,7 +1058,6 @@ async fn annotate_handler(
                     let sig = match node { Node::Function(f) => &f.signature, _ => "" };
                     let sl = base.span.as_ref().map(|s| s.start_line).unwrap_or(0);
                     let el = base.span.as_ref().map(|s| s.end_line).unwrap_or(0);
-                    let lang = base.language.as_deref().unwrap_or("");
                     let src = mapit_core::graph::context::read_source_snippet(&target, base.file_path.as_deref().unwrap_or(""), sl, el);
                     let has_incoming = match node { Node::Function(f) => f.has_incoming_calls, _ => false };
                     let is_entry = match node { Node::Function(f) => f.is_entry_point_candidate, _ => false };
