@@ -12,6 +12,7 @@ import type {
   ConfigUpdate,
   RemapResponse,
   AnnotateResponse,
+  SimulateResponse,
 } from "./types";
 
 const BASE = `${window.location.protocol}//${window.location.host}/api`;
@@ -96,6 +97,9 @@ export const api = {
   updateConfig: (cfg: ConfigUpdate) => put<AppConfig>("/config", cfg),
 
   remap: (force = false) => post<RemapResponse>("/remap", { force }),
+
+  simulate: (name: string, level?: string) =>
+    post<SimulateResponse>("/simulate", { name, level }),
 
   annotate: (all = false, force = false) =>
     post<AnnotateResponse>("/annotate", { all, force }),

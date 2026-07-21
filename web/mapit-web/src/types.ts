@@ -336,3 +336,15 @@ export interface AppState {
   /** Background progress overlay — used when remap/annotate runs while the graph is visible */
   bgProgress: ProgressState | null;
 }
+
+export interface SimStepData {
+  summary: string;
+  entry: string;
+  inputs: { name: string; type: string; from_user: string; from_system: string }[];
+  steps: { order: number; action: string; detail: string }[];
+  outputs: { name: string; type: string; to_user: string; to_system: string; side_effects: string }[];
+  exit: string;
+  errors: { condition: string; result: string }[];
+}
+
+export type SimulateResponse = SimStepData | { error: string };
