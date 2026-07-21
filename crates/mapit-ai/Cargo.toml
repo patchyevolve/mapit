@@ -3,7 +3,6 @@ name = "mapit-ai"
 version = "0.2.0"
 edition = "2021"
 description = "AI enrichment layer for the mapit codebase mapper — summarization, flaw detection, simulation"
-license = "MIT"
 repository = "https://github.com/patchyevolve/mapit"
 homepage = "https://github.com/patchyevolve/mapit"
 keywords = ["codebase", "ai", "code-analysis", "llm"]

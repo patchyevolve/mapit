@@ -3,7 +3,6 @@ name = "mapit-cli"
 version = "0.2.0"
 edition = "2021"
 description = "AI-powered interactive codebase mapper — CLI tool that builds call-graphs, enriches with AI, and serves a live web UI"
-license = "MIT"
 repository = "https://github.com/patchyevolve/mapit"
 homepage = "https://github.com/patchyevolve/mapit"
 keywords = ["codebase", "mapper", "call-graph", "static-analysis", "ai"]
