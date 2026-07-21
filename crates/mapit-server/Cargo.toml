@@ -19,8 +19,8 @@ tokio = { workspace = true }
 axum = { version = "0.8.4", features = ["ws"] }
 futures = { version = "0.3.31" }
 tower-http = { version = "0.6.6", features = ["cors", "fs"] }
-mapit-core = { path = "../mapit-core" }
-mapit-ai = { path = "../mapit-ai" }
+mapit-core = { workspace = true }
+mapit-ai = { workspace = true }
 rust-embed = { workspace = true }
 mime_guess = { version = "2.0.5" }
 sha2 = { workspace = true }

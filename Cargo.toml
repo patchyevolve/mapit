@@ -45,6 +45,11 @@ petgraph = { version = "0.8.1" }
 # embedded assets
 rust-embed = { version = "8.11.0" }
 
+# workspace-local crates (path for local dev, version for crates.io publish)
+mapit-core = { path = "crates/mapit-core", version = "0.2.0" }
+mapit-ai = { path = "crates/mapit-ai", version = "0.2.0" }
+mapit-server = { path = "crates/mapit-server", version = "0.2.0" }
+
 [workspace.metadata.dist]
 cargo-dist-version = "0.28.4"
 rust-toolchain-version = "1.83.0"

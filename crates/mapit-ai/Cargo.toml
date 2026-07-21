@@ -17,4 +17,4 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
-mapit-core = { path = "../mapit-core" }
+mapit-core = { workspace = true }
