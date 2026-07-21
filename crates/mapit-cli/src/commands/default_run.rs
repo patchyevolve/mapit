@@ -4,25 +4,41 @@ use mapit_core::config;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 const SPLASH: &str = r#"
-                    __  __    _    ____  _   ___
-                   |  \/  |  / \  |  _ \| | |_ _|
-                   | |\/| | / _ \ | |_) | |   |
-                   | |  | |/ ___ \|  __/| |   |
-                   |_|  |_/_/   \_\_|   |_|  _|_
+  ┌─────────────────────────────────────────┐
+  │                                         │
+  │     __  __    _    ____  _   ___        │
+  │    |  \/  |  / \  |  _ \| | |_ _|       │
+  │    | |\/| | / _ \ | |_) | |   |         │
+  │    | |  | |/ ___ \|  __/| |   |         │
+  │    |_|  |_/_/   \_\_|   |_|  _|_        │
+  │                                         │
+  │       Interactive Codebase Mapper       │
+  │              v0.2.0                     │
+  └─────────────────────────────────────────┘
 "#;
 
 const USE_CASES: &str = r#"
-  ┌───────────────────────────────────────────────────────────────┐
-  │                                                               │
-  │  🗺  Interactive codebase mapper with AI-powered insights      │
-  │                                                               │
-  │  • Structural mapping  – build a call-graph from your code     │
-  │  • AI enrichment       – auto-summarize symbols & flag flaws   │
-  │  • Interactive graph   – explore, trace, search                │
-  │  • Execution simulation– animate call paths through the graph   │
-  │  • Live web UI         – visual, real-time interactive view    │
-  │                                                               │
-  └───────────────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────┐
+  │                                         │
+  │  🗺  Interactive codebase mapper        │
+  │      with AI-powered insights           │
+  │                                         │
+  │  • Structural mapping                   │
+  │    build a call-graph from your code    │
+  │                                         │
+  │  • AI enrichment                        │
+  │    auto-summarize symbols & flag flaws  │
+  │                                         │
+  │  • Interactive graph                    │
+  │    explore, trace, search               │
+  │                                         │
+  │  • Execution simulation                 │
+  │    animate call paths through the graph  │
+  │                                         │
+  │  • Live web UI                          │
+  │    visual, real-time interactive view   │
+  │                                         │
+  └─────────────────────────────────────────┘
 "#;
 
 fn show_splash() {
@@ -33,16 +49,18 @@ fn show_splash() {
 
 fn show_help(port: u16) {
     println!();
-    println!("  \x1b[1mCommands\x1b[0m  (connected to http://127.0.0.1:{port})");
-    println!("  ─────────────────────────────────────────────");
-    println!("  \x1b[33mannotate\x1b[0m   – Run AI enrichment (summaries + flaws)");
-    println!("  \x1b[33mremap\x1b[0m       – Re-run structural mapping");
-    println!("  \x1b[33mstatus\x1b[0m      – Show project stats");
-    println!("  \x1b[33mflaws\x1b[0m       – List AI-detected flaws");
-    println!("  \x1b[33msearch <q>\x1b[0m  – Search symbols");
-    println!("  \x1b[33mopen\x1b[0m        – Open web UI in browser");
-    println!("  \x1b[33mhelp\x1b[0m        – Show this help");
-    println!("  \x1b[33mexit\x1b[0m        – Stop server and quit");
+    println!("  ┌─────────────────────────────────────────┐");
+    println!("  │ \x1b[1mCommands\x1b[0m   http://127.0.0.1:{port}      │");
+    println!("  ├─────────────────────────────────────────┤");
+    println!("  │ \x1b[33mannotate\x1b[0m   Run AI enrichment        │");
+    println!("  │ \x1b[33mremap\x1b[0m       Re-run structural mapping │");
+    println!("  │ \x1b[33mstatus\x1b[0m      Show project stats       │");
+    println!("  │ \x1b[33mflaws\x1b[0m       List AI-detected flaws   │");
+    println!("  │ \x1b[33msearch <q>\x1b[0m  Search symbols           │");
+    println!("  │ \x1b[33mopen\x1b[0m        Open web UI in browser   │");
+    println!("  │ \x1b[33mhelp\x1b[0m        Show this help           │");
+    println!("  │ \x1b[33mexit\x1b[0m        Stop server and quit     │");
+    println!("  └─────────────────────────────────────────┘");
     println!();
 }
 
@@ -250,9 +268,8 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
     } else {
         println!("  Open http://127.0.0.1:{port} in your browser.");
     }
-    println!("\x1b[90m────────────────────────────────────────────────\x1b[0m");
-    println!("\x1b[2mServer logs appear below. Type commands at the prompt.\x1b[0m");
-    println!();
+    println!("\x1b[90m  ─────────────────────────────────────────\x1b[0m");
+    println!("\x1b[2m  Server logs appear below. Type \x1b[33mhelp\x1b[2m for commands.\x1b[0m");
 
     let _ = interactive_loop(port).await;
 
