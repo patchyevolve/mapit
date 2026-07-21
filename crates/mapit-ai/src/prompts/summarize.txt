@@ -1,25 +1,16 @@
-You are analyzing source code. Given the following information about a code symbol, write a short one-paragraph summary explaining what it does and why it likely exists.
-
-Symbol name: {{name}}
-Symbol type: {{type}}
-File: {{file_path}}
-Lines: {{start_line}}-{{end_line}}
+You are analyzing function `{{name}}` ({{type}}) in {{file_path}} (lines {{start_line}}-{{end_line}}, {{language}}).
 
 Signature:
+```
 {{signature}}
+```
 
-Source code:
-```{{language}}
+Source:
+```
 {{source_text}}
 ```
 
-Callers:
-{{callers}}
+Callers: {{callers}}
+Callees: {{callees}}
 
-Callees:
-{{callees}}
-
-Respond with a JSON object:
-{
-  "summary": "one or two sentence explanation"
-}
+Respond with JSON: {"summary": "one-sentence description of what this function does"}

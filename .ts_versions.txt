@@ -1,8 +1,0 @@
-name = "tree-sitter"
-name = "tree-sitter-c"
-name = "tree-sitter-cpp"
-name = "tree-sitter-javascript"
-name = "tree-sitter-language"
-name = "tree-sitter-python"
-name = "tree-sitter-rust"
-name = "tree-sitter-typescript"

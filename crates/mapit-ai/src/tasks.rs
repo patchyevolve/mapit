@@ -252,15 +252,6 @@ pub fn classify(
     parse_json(&response.content)
 }
 
-// ---------------------------------------------------------------------------
-// Task 3: Flag flaws
-// ---------------------------------------------------------------------------
-
-#[derive(Deserialize)]
-pub struct FlagFlawsOutput {
-    pub flaws: Vec<Flaw>,
-}
-
 #[derive(Deserialize)]
 pub struct Flaw {
     pub kind: String,
@@ -268,56 +259,6 @@ pub struct Flaw {
     pub description: String,
     pub confidence: f64,
     pub basis: String,
-}
-
-pub fn flag_flaws(
-    provider: &dyn AiProvider,
-    model: &str,
-    name: &str,
-    file_path: &str,
-    start_line: u32,
-    end_line: u32,
-    has_incoming_calls: bool,
-    is_entry_point_candidate: bool,
-    language: &str,
-    source_text: &str,
-    signature: &str,
-    callers: &[String],
-    callees: &[String],
-) -> Result<FlagFlawsOutput> {
-    let user_prompt = prompts::FLAW_FLAGS
-        .replace("{{name}}", name)
-        .replace("{{file_path}}", file_path)
-        .replace("{{start_line}}", &start_line.to_string())
-        .replace("{{end_line}}", &end_line.to_string())
-        .replace("{{has_incoming_calls}}", &has_incoming_calls.to_string())
-        .replace(
-            "{{is_entry_point_candidate}}",
-            &is_entry_point_candidate.to_string(),
-        )
-        .replace("{{language}}", language)
-        .replace("{{source_text}}", source_text)
-        .replace("{{signature}}", signature)
-        .replace("{{callers}}", &callers.join(", "))
-        .replace("{{callees}}", &callees.join(", "));
-
-    let request = AiRequest {
-        model: model.to_owned(),
-        system_prompt: Some("You are a code analysis assistant. Always return valid JSON.".into()),
-        user_prompt,
-        expect_json: true,
-    };
-
-    let response = try_complete(provider, &request)?;
-    // flag_flaws must never hard-fail the annotation run — if JSON parse fails,
-    // return empty flaws (degraded-but-alive per AGENTS.md §2).
-    match parse_json::<FlagFlawsOutput>(&response.content) {
-        Ok(out) => Ok(out),
-        Err(e) => {
-            error!("flag_flaws parse failed (returning empty): {e:#}");
-            Ok(FlagFlawsOutput { flaws: vec![] })
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

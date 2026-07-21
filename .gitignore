@@ -24,3 +24,10 @@ crates/mapit-server/embedded_dist/
 .mapit_build.txt
 .mapit_test.txt
 .mapit_results.txt
+.mapit_err.txt
+.git_commit.txt
+.git_status.txt
+.ts_debug.txt
+.ts_versions.txt
+server*.log
+test-*.sh
