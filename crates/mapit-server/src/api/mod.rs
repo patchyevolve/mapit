@@ -938,9 +938,24 @@ async fn annotate_handler(
         sorted_fps.sort_by_key(|fp| depth_memo.get(*fp).copied().unwrap_or(0));
 
         let mut processed_count = 0usize;
+        let mut consecutive_failures = 0usize;
+        const MAX_CONSECUTIVE_FAILURES: usize = 5;
 
         for file_path in sorted_fps {
             let nodes_in_file = &by_file[file_path];
+
+            // Abort early if provider is down (5 consecutive failures)
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                warn!("Aborting annotation — {consecutive_failures} consecutive files failed (provider may be down)");
+                let                 _ = ws_tx.send(json!({
+                    "event": "error",
+                    "scope": "ai_call",
+                    "message": format!("Provider unreachable — {consecutive_failures} consecutive failures. Check Settings → API Connection or try a different provider."),
+                    "detail": "Annotation aborted early. Fix the provider and re-run `mapit annotate`.",
+                }).to_string());
+                break;
+            }
+
             if cancel_flag.load(Ordering::SeqCst) {
                 info!("Annotation cancelled by user");
                 let _ = ws_tx.send(
@@ -1001,6 +1016,7 @@ async fn annotate_handler(
 
             match batch_result {
                 Ok(BatchSummarizeOutput { summaries }) => {
+                    consecutive_failures = 0;
                     let mut applied = std::collections::HashSet::new();
                     for entry in &summaries {
                         if let Some(node) = name_to_node.get(entry.name.as_str()) {
@@ -1024,6 +1040,7 @@ async fn annotate_handler(
                     }
                 }
                 Err(e) => {
+                    consecutive_failures += 1;
                     // Batch failed — mark ALL functions in this file Unavailable
                     let err_msg = format!("Batch summarize failed for {file_path}: {e}");
                     error!("{err_msg}");
@@ -1085,6 +1102,7 @@ Source code:
                 );
                 match flaw_result {
                     Ok(BatchFlagFlawsOutput { flaws }) => {
+                        consecutive_failures = 0;
                         for node in nodes_in_file {
                             let base = node.base();
                             let is_dc_candidate = model::is_dead_code_candidate(node);
@@ -1126,6 +1144,7 @@ Source code:
                         }
                     }
                     Err(e) => {
+                        consecutive_failures += 1;
                         error!("Batch flaw-flagging failed for {file_path}: {e}");
                     }
                 }
