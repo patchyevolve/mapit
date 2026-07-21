@@ -1,4 +1,4 @@
-# mapit — codebase mapper
+# mapit
 
 ```
                     __  __    _    ____ ___ ___
@@ -8,33 +8,48 @@
                    |_|  |_/_/   \_\_|  |___\___/
 ```
 
-mapit parses your project with tree-sitter, builds a full call graph and dependency map, then serves an interactive web UI and CLI for exploring it. Works for Rust, C, C++, Python, JavaScript, TypeScript, and assembly.
+mapit scans your source code, builds a complete call graph using tree-sitter, and lets you explore it through a web UI and an interactive terminal. Think of it like a live map of your codebase — what calls what, which files depend on what, how functions flow into each other.
+
+Built as a final-year project. Works with Rust, C, C++, Python, JavaScript, TypeScript, and assembly.
 
 ## Quick start
 
 ```bash
+cd some-project
 mapit
 ```
 
-Run it in any project directory. On first launch it walks your source tree, parses every file, resolves symbols and call edges, opens a browser with the interactive graph, and drops you into a terminal prompt for live queries. No separate server or database setup.
+It'll walk your source tree, parse everything, build the graph, open a browser at `http://127.0.0.1:7780`, and drop you into an interactive prompt. No database to set up, no server to configure. Just runs.
+
+## What it does
+
+The core feature is structural mapping — parsing source files with tree-sitter and resolving symbols, calls, includes, and references into a queryable graph. All of that works offline with zero configuration.
+
+On top of the graph, there are optional features that use an LLM (bring your own — Ollama, OpenAI, or anything compatible):
+- **Summaries** — one-line descriptions for every function, with cross-file context
+- **Flaw detection** — flags dead code, circular deps, suspicious patterns, missing error handling
+- **Text simulation** — describes the runtime flow of a function or the whole project
+
+The web UI lets you explore the graph visually, and the interactive CLI lets you query things without leaving the terminal.
 
 ## Install
 
+**macOS / Linux (one-liner)**
 ```bash
 curl -sfSL https://raw.githubusercontent.com/patchyevolve/mapit/main/install.sh | sh
 ```
 
-Or via Homebrew:
+**Homebrew**
 ```bash
 brew install patchyevolve/tap/mapit
 ```
 
-Windows:
+**Windows (PowerShell)**
 ```powershell
 powershell -c "irm https://github.com/patchyevolve/mapit/releases/latest/download/install.ps1 | iex"
 ```
 
-From source:
+**From source**
 ```bash
 git clone https://github.com/patchyevolve/mapit.git
 cd mapit
@@ -42,62 +57,64 @@ cargo build --release
 ./target/release/mapit
 ```
 
-## Features
+Pre-built binaries are on the [releases page](https://github.com/patchyevolve/mapit/releases) for Linux, macOS (Intel + Apple Silicon), and Windows.
 
-### Structural mapping
-- Tree-sitter parsing for Rust, C, C++, assembly, Python, JavaScript/TypeScript
-- Call graph, include graph, define/reference edges — all from static analysis
-- Incremental re-mapping: only re-parses files whose content changed
-- Control-flow extraction per function: blocks, branches, loops
+## Walkthrough
 
-### AI enrichment (optional)
-- Batch summarization: one LLM call per file instead of per function
-- Cross-file context: caller summaries and project overview injected into prompts
-- Flaw detection: dead code, circular dependencies, structural smells, suspected bugs
-- Structural dead-code gate: skips functions that still have incoming calls
-- Skip AI entirely with `mapit annotate --no-flaws`
+```bash
+# Point it at a project
+cd ~/my-project
+mapit
 
-### Execution simulation
-Animated traversal through the call graph, purely structural (no AI):
+# You'll see the splash screen, parsing happens,
+# then a browser opens. Back in the terminal:
 
-| Scope | Trigger | What it does |
-|---|---|---|
-| **Function** | Function detail panel → "Simulate execution from here" | DFS from one function |
-| **File** | File view header → "Simulate file" | DFS from every function in that file |
-| **Subsystem** | Feature/subsystem view → "Simulate subsystem" | DFS from every function in a feature group |
-| **Module** | File browser directory header → "Simulate" | DFS from every function under a directory |
-| **Project** | System overview stats bar → "Simulate project" | DFS from all entry-point candidates |
+mapit> status
+Parsed: 143 files, 892 symbols, 1241 call edges, 3403 reference edges
 
-### AI simulation (`mapit simulate`)
-Text-based simulation describing what happens at runtime — entry points, execution steps, data flow, error conditions, and system effects. Scope can be a single function, file, module, or the whole project.
+mapit> annotate
+# AI enrichment runs (takes a minute depending on project size)
+
+mapit> flaws
+Found 12 flaws:
+  dead_code unused_helper — function is never called  (src/utils.rs:45)
+  missing_error_handling read_config — unwrap on file read  (src/config.rs:30)
+
+mapit> search parse
+  parse_config    (src/config.rs:10)
+  parse_request   (src/server/handler.rs:55)
+  parse_args      (src/cli.rs:22)
+
+mapit> exit
+```
 
 ## CLI reference
 
 | Command | What it does |
 |---|---|
-| `mapit` | Full pipeline: map → server → browser → interactive prompt |
-| `mapit init` | Set up LLM provider without mapping |
+| `mapit` | Map → server → browser → interactive prompt |
+| `mapit init` | Configure LLM provider interactively |
 | `mapit map` | Structural mapping only |
-| `mapit map --force` | Full re-map, ignore cache |
-| `mapit annotate` | Run AI enrichment against existing map |
-| `mapit annotate --no-flaws` | Skip flaw-flagging pass |
+| `mapit map --force` | Re-map everything from scratch |
+| `mapit annotate` | Run AI enrichment (summary + flaws) |
+| `mapit annotate --no-flaws` | Skip flaw detection |
 | `mapit open` | Start web server without re-mapping |
-| `mapit status` | Print summary: files, symbols, edges, coverage |
+| `mapit status` | Files, symbols, edges, coverage stats |
 | `mapit find <name>` | Search symbols by name |
-| `mapit explain <name>` | Show signature, callers, callees, summary |
-| `mapit trace <name> [--depth N]` | Print execution trace from an entry point |
-| `mapit flaws [--severity high\|warning\|info]` | List detected issues |
-| `mapit ask "<question>"` | Ask about the codebase |
-| `mapit config show` | Show current configuration |
-| `mapit config set-provider <provider>` | Switch LLM provider |
-| `mapit config set-model <model>` | Change LLM model |
-| `mapit projects list` | List previously mapped projects |
-| `mapit projects remove <path>` | Remove a project from history |
-| `mapit simulate <name> [--level function\|file\|module\|project]` | AI text simulation |
+| `mapit explain <name>` | Signature, callers, callees, summary |
+| `mapit trace <name> [--depth N]` | Execution trace from an entry point |
+| `mapit flaws [--severity ...]` | List flagged issues (filter by severity) |
+| `mapit ask "<question>"` | Free-form question about the codebase |
+| `mapit simulate <name> [--level ...]` | Text-based runtime simulation |
+| `mapit config show` | Print current config |
+| `mapit config set-provider <name>` | Switch LLM provider |
+| `mapit config set-model <name>` | Change LLM model |
+| `mapit projects list` | Previously mapped projects |
+| `mapit projects remove <path>` | Remove from history |
 
 ## Interactive CLI
 
-Once the server starts, you get a `mapit>` prompt connected to `http://127.0.0.1:7780`:
+After `mapit` starts, you get a prompt connected to the running server:
 
 ```
 mapit> help
@@ -105,7 +122,7 @@ mapit> help
   Commands  (connected to http://127.0.0.1:7780)
   ─────────────────────────────────────────────
   annotate          Run AI enrichment
-  simulate <name>   AI text simulation
+  simulate <name>   Text-based simulation
   remap             Re-run structural mapping
   status            Show project stats
   flaws             List detected issues
@@ -117,43 +134,69 @@ mapit> help
 
 ## Web UI
 
-The web interface is the main way to navigate the mapped project:
+The web UI has a few sections:
 
-- **Force-directed graph** — explore symbols and their connections visually; pan, zoom, click any node
-- **File browser** — tree view of the project with function lists per file
-- **Function detail panel** — signature, callers, callees, AI summary, flaws, control-flow graph
-- **System overview** — entry points, features grouped by directory, project-wide stats
-- **Simulation** — animated DFS traversal starting from any function, file, module, or the whole project
-- **Settings** — configure your LLM provider and model from within the UI
+**Graph view** — force-directed layout of all symbols. Each node is a function, file, or module. You can click any node to see details, pan and zoom around.
+
+**File browser** — tree view on the left. Click a file to see all its functions, their signatures, and AI summaries (if annotated).
+
+**Function detail panel** — shows the signature, list of callers and callees (clickable), AI summary, any flagged flaws, and the control-flow graph (blocks, branches, loops).
+
+**System overview** — lists entry points (main functions, pub exports), groups files by directory into feature clusters, shows project-wide stats.
+
+**Simulation** — click "Simulate" on any function, file, or the whole project. You get an animated DFS traversal. In the browser it's visual; in the CLI via `mapit simulate` it's a text breakdown with steps, inputs, outputs, and error conditions.
+
+**Settings** — configure your LLM endpoint and model from within the UI.
 
 ## Architecture
 
 ```
 mapit/
-  crates/
-    mapit-core/     — walker, tree-sitter parsers (6 languages), graph builder,
-    |                 SQLite store, control-flow extraction
-    mapit-ai/       — LLM provider trait, Ollama + OpenAI-compatible, prompt templates
-    mapit-server/   — REST + WebSocket API, serves embedded web UI
-    mapit-cli/      — binary entry point and all subcommands
-  web/
-    mapit-web/      — React + TypeScript frontend with 3D force-directed graph
+├── Cargo.toml
+├── crates/
+│   ├── mapit-core/     — walker, tree-sitter parsers (6 languages), graph builder,
+│   │                     SQLite store, control-flow extraction
+│   ├── mapit-ai/       — LLM provider trait (Ollama, OpenAI-compatible), prompt templates
+│   ├── mapit-server/   — REST + WebSocket API, embeds the frontend
+│   └── mapit-cli/      — binary entry point, all subcommands, interactive loop
+└── web/
+    └── mapit-web/      — React + TypeScript frontend, force-directed graph
 ```
+
+The entire web UI is compiled into the binary at build time — the server serves it from memory. No separate deployment needed.
+
+Language adapters are standalone per-language modules that implement a shared `LanguageAdapter` trait. Adding a new language means writing a new adapter file that maps tree-sitter CST nodes to the graph schema.
 
 ## Requirements
 
-- macOS or Linux (Windows via MSVC/MSYS2)
-- Static binary with embedded web UI — no runtime dependencies beyond the OS
+- macOS or Linux (Windows works via MSVC/MSYS2)
+- The binary is statically linked with the frontend embedded — nothing else to install
 
 ## Development
 
 ```bash
+# Build everything
 cargo build --release
+
+# Run tests (125+ across all crates)
 cargo test --release
 
-# Frontend watch mode (rebuilds on save):
+# Frontend dev server (hot reload)
 cd web/mapit-web && npm run dev
+
+# Just the backend
+./target/release/mapit
 ```
+
+The frontend auto-rebuilds when source files change under `web/`. If the built frontend already exists, the Rust build skips the npm step so iteration is fast.
+
+## Built with
+
+- [tree-sitter](https://tree-sitter.github.io/) — parsing for all supported languages
+- [rusqlite](https://github.com/rusqlite/rusqlite) — graph storage
+- [react-force-graph-2d](https://github.com/vasturiano/react-force-graph-2d) — graph visualization
+- [axum](https://github.com/tokio-rs/axum) — web server
+- [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) — WebSocket for live progress
 
 ## License
 
