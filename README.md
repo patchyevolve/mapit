@@ -1,4 +1,4 @@
-# mapit — AI-Powered Interactive Codebase Mapper
+# mapit — bro just run it and it maps your whole project
 
 ```
                     __  __    _    ____ ___ ___
@@ -8,7 +8,7 @@
                    |_|  |_/_/   \_\_|  |___\___/
 ```
 
-Run `mapit` inside any project folder. It parses the entire codebase using tree-sitter (deterministic, AI-free parsing), builds a true call/dependency graph with execution-order models, and serves an interactive web UI.
+so basically you just run `mapit` in any project folder and it figures out everything — what calls what, which files depend on what, even how functions flow into each other at runtime. no bs, purely built on tree-sitter so the graph is actually real, not AI hallucinating stuff.
 
 ## Quick start
 
@@ -17,9 +17,9 @@ Run `mapit` inside any project folder. It parses the entire codebase using tree-
 mapit
 ```
 
-On first run, `mapit` shows a splash screen, prompts for AI provider setup (can skip), runs structural mapping, opens the web browser, and drops you into an interactive CLI prompt connected to the running server.
+first time you run it, it shows a cool splash screen, asks if you wanna set up AI (skip if you want — mapping works without it), then just goes brrr — parses everything, opens a browser with a live graph, and drops you into an interactive terminal where you can type commands and stuff.
 
-Structural mapping (files, symbols, call edges) works **without any AI provider**.
+structural mapping (files, symbols, call edges) works **without any AI provider**. AI is only needed if you want summaries and flaw detection.
 
 ## Features
 
