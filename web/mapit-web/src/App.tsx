@@ -51,9 +51,15 @@ export default function App() {
                 dispatch({ type: "SET_ALL_NODES", nodes: fullMap });
                 dispatch({ type: "SET_EDGES", edges: edgesRes.edges });
               })
-              .catch(console.error);
+              .catch((err) => {
+                console.error(err);
+                setErrorToast("Failed to load graph data — check the server connection.");
+              });
           })
-          .catch(console.error);
+          .catch((err) => {
+            console.error(err);
+            setErrorToast("Failed to load project data — check the server connection.");
+          });
       })
       .catch((err) => {
         console.warn("No project data yet:", err.message);
@@ -120,7 +126,10 @@ export default function App() {
                   dispatch({ type: "SET_PROJECT", project });
                   dispatch({ type: "SET_FLAWS", flaws: flawsRes.flaws });
                 })
-                .catch(console.error);
+                .catch((err) => {
+                  console.error(err);
+                  setErrorToast("Failed to refresh after annotation.");
+                });
             }, 800);
           }
           break;
@@ -129,7 +138,10 @@ export default function App() {
         case "node_updated":
           api.node(event.node_id).then((node) => {
             dispatch({ type: "UPSERT_NODE", node });
-          }).catch(console.error);
+          }).catch((err) => {
+            console.error(err);
+            setErrorToast("Failed to update node from server.");
+          });
           break;
 
         case "error": {

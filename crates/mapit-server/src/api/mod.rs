@@ -252,9 +252,9 @@ async fn neighbors_handler(
 async fn trace_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Query(_q): Query<NeighborsQuery>,
+    Query(q): Query<NeighborsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _ = &_q;
+    let max_depth = q.depth.unwrap_or(6) as usize;
     let store = state.store.lock().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -283,7 +283,7 @@ async fn trace_handler(
     };
 
     if let Some(cfg) = cfgs {
-        let paths = mapit_core::control_flow::walk_trace(cfg);
+        let paths = mapit_core::control_flow::walk_trace_with_depth(cfg, max_depth);
         // Build a block_id -> block lookup (IDs are "blk_0", not usize indices)
         let mut block_idx = std::collections::HashMap::new();
         for (i, b) in cfg.blocks.iter().enumerate() {
@@ -335,7 +335,12 @@ async fn nodes_handler(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let store = state.store.lock().unwrap();
+    let store = state.store.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+    })?;
     let filter_type = params.get("type").map(|s| s.as_str());
     let all = store.get_all_nodes().map_err(|e| {
         (

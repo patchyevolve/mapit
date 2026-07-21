@@ -21,12 +21,19 @@ pub async fn run(target: &Path, cli_port: Option<u16>) -> Result<()> {
         println!("Port {preferred} is in use — using port {port} instead.");
     }
 
-    println!("Starting mapit server on http://127.0.0.1:{port}");
-    println!("Open http://127.0.0.1:{port} in your browser.");
+    let url = format!("http://127.0.0.1:{port}");
+    println!("Starting mapit server on {url}");
+    if webbrowser::open(&url).is_ok() {
+        println!("Browser opened.");
+    } else {
+        println!("Open {url} in your browser.");
+    }
     println!("Press Ctrl+C to stop the server.");
 
     mapit_server::serve(&db_path, port, Some(target)).await
         .context("server error")?;
+
+    println!("Server stopped.");
 
     Ok(())
 }

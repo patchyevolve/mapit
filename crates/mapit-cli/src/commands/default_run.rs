@@ -103,7 +103,15 @@ async fn interactive_loop(port: u16) -> Result<()> {
                 match client.get(format!("{}/api/project", base)).send().await {
                     Ok(resp) => {
                         if let Ok(body) = resp.json::<serde_json::Value>().await {
-                            println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+                            let files = body["file_count"].as_u64().unwrap_or(0);
+                            let symbols = body["symbol_count"].as_u64().unwrap_or(0);
+                            let call_edges = body["call_edge_count"].as_u64().unwrap_or(0);
+                            let ref_edges = body["reference_edge_count"].as_u64().unwrap_or(0);
+                            let annotated = body["annotated_function_count"].as_u64().unwrap_or(0);
+                            println!("Parsed: {files} files, {symbols} symbols, {call_edges} call edges, {ref_edges} reference edges");
+                            if annotated > 0 {
+                                println!("Annotated: {annotated} functions");
+                            }
                         }
                     }
                     Err(e) => eprintln!("Error: {e}"),
@@ -112,9 +120,14 @@ async fn interactive_loop(port: u16) -> Result<()> {
             "annotate" => {
                 let payload = serde_json::json!({ "all": true, "force": false, "skip_flaws": false });
                 match client.post(format!("{}/api/annotate", base)).json(&payload).send().await {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(body) => println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default()),
-                        Err(e) => eprintln!("Error parsing response: {e}"),
+                    Ok(resp) => {
+                        if let Ok(body) = resp.json::<serde_json::Value>().await {
+                            if let Some(total) = body.get("total").and_then(|v| v.as_u64()) {
+                                println!("Annotation started — {total} functions queued.");
+                            } else {
+                                println!("Annotation started. Run `status` to check progress.");
+                            }
+                        }
                     }
                     Err(e) => eprintln!("Error: {e}"),
                 }
@@ -123,15 +136,25 @@ async fn interactive_loop(port: u16) -> Result<()> {
                 let force = line.split_whitespace().any(|w| w == "--force");
                 let payload = serde_json::json!({ "force": force });
                 match client.post(format!("{}/api/remap", base)).json(&payload).send().await {
-                    Ok(resp) => match resp.json::<serde_json::Value>().await {
-                        Ok(body) => println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default()),
-                        Err(e) => eprintln!("Error parsing response: {e}"),
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            println!("Re-mapping complete.");
+                        } else {
+                            eprintln!("Re-mapping failed (HTTP {})", resp.status());
+                        }
                     }
                     Err(e) => eprintln!("Error: {e}"),
                 }
             }
             "flaws" => {
-                match client.get(format!("{}/api/graph/flaws", base)).send().await {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                let severity_filter = parts.iter().position(|p| *p == "--severity")
+                    .and_then(|i| parts.get(i + 1).copied());
+                let mut url = format!("{}/api/graph/flaws", base);
+                if let Some(s) = severity_filter {
+                    url.push_str(&format!("?severity={s}"));
+                }
+                match client.get(&url).send().await {
                     Ok(resp) => {
                         if let Ok(body) = resp.json::<serde_json::Value>().await {
                             let flaws = &body["flaws"];
@@ -157,7 +180,8 @@ async fn interactive_loop(port: u16) -> Result<()> {
                     println!("Usage: simulate <symbol> [--level function|file|module|project]");
                     continue;
                 }
-                let name = parts[1..].iter().filter(|p| !p.starts_with("--")).copied().collect::<Vec<&str>>().join(" ");
+                let known_flags = ["--level"];
+                let name = parts[1..].iter().filter(|p| !known_flags.contains(p)).copied().collect::<Vec<&str>>().join(" ");
                 let level = parts.iter().position(|p| *p == "--level")
                     .and_then(|i| parts.get(i + 1).copied())
                     .unwrap_or("function");
@@ -165,7 +189,24 @@ async fn interactive_loop(port: u16) -> Result<()> {
                 match client.post(format!("{}/api/simulate", base)).json(&payload).send().await {
                     Ok(resp) => {
                         if let Ok(body) = resp.json::<serde_json::Value>().await {
-                            println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+                            if let Some(summary) = body.get("summary").and_then(|v| v.as_str()) {
+                                println!("{summary}");
+                                println!();
+                            }
+                            if let Some(entry) = body.get("entry").and_then(|v| v.as_str()) {
+                                println!("Entry: {entry}");
+                            }
+                            if let Some(exit) = body.get("exit").and_then(|v| v.as_str()) {
+                                println!("Exit: {exit}");
+                            }
+                            if let Some(steps) = body.get("steps").and_then(|v| v.as_array()) {
+                                println!("\nSteps:");
+                                for s in steps {
+                                    let order = s["order"].as_u64().unwrap_or(0);
+                                    let action = s["action"].as_str().unwrap_or("");
+                                    println!("  {order}. {action}");
+                                }
+                            }
                         }
                     }
                     Err(e) => eprintln!("Error: {e}"),

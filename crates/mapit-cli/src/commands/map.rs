@@ -105,7 +105,7 @@ pub async fn run(target: &Path, force: bool) -> Result<()> {
         .collect();
 
     // --- Progress bar setup ---
-    let use_progress = std::io::stderr().is_terminal() && !force && changed < source_files.len();
+    let use_progress = std::io::stderr().is_terminal() && changed < source_files.len();
     let total_files = source_files.len() as u64;
     let pb = if use_progress {
         let pb = ProgressBar::new(total_files);

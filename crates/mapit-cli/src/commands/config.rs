@@ -16,7 +16,7 @@ pub async fn run(action: ConfigAction) -> Result<()> {
     match action {
         ConfigAction::Show => {
             let global = config::load_global_config(&config_dir).unwrap_or_default();
-            println!("Global config ({:?}/global_config.json):", config_dir);
+            println!("Global config ({}/global_config.json):", config_dir.display());
             println!("  Default provider : {}", global.default_provider);
             println!("  Default model    : {}", global.default_model);
             println!("  Ollama base URL  : {}", global.ollama_base_url);

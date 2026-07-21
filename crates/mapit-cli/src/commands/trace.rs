@@ -1,7 +1,7 @@
 use std::path::Path;
 use anyhow::Result;
 use mapit_core::{
-    control_flow::walk_trace,
+    control_flow::walk_trace_with_depth,
     graph::{
         model::Node,
         store::GraphStore,
@@ -30,7 +30,7 @@ pub async fn run(target: &Path, name: &str, depth: usize) -> Result<()> {
     match node {
         Node::Function(f) => {
             if let Some(cfg) = &f.control_flow {
-                let paths = walk_trace(cfg);
+                let paths = walk_trace_with_depth(cfg, depth);
                 println!(
                     "Trace from \"{}\" ({} paths, max depth {depth}):",
                     f.base.name,

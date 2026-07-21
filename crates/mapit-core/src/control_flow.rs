@@ -600,6 +600,10 @@ pub struct TracePath {
 ///
 /// This is the `/api/graph/trace/:id` primitive (data model §5 / 05-backend-schema.md §6).
 pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
+    walk_trace_with_depth(cfg, 0)
+}
+
+pub fn walk_trace_with_depth(cfg: &ControlFlowGraph, max_depth: usize) -> Vec<TracePath> {
     let mut paths: Vec<TracePath> = Vec::new();
     let mut stack: Vec<(/* block_id */ String, /* visited */ Vec<String>, /* conditions */ Vec<String>)> = Vec::new();
 
@@ -617,8 +621,16 @@ pub fn walk_trace(cfg: &ControlFlowGraph) -> Vec<TracePath> {
     stack.push((entry.id.clone(), Vec::new(), Vec::new()));
 
     while let Some((current_id, mut visited, conditions)) = stack.pop() {
-        // Cycle guard: skip if we've seen this block on this path
         if visited.contains(&current_id) {
+            continue;
+        }
+        if max_depth > 0 && visited.len() >= max_depth {
+            let label = if conditions.is_empty() {
+                String::new()
+            } else {
+                conditions.join(" → ")
+            };
+            paths.push(TracePath { label, blocks: visited });
             continue;
         }
         visited.push(current_id.clone());

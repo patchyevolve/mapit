@@ -318,12 +318,19 @@ Source code:
         })
         .collect();
     if !file_nodes.is_empty() {
-        println!("  Summarizing {} files...", file_nodes.len());
+        let pb2 = ProgressBar::new(file_nodes.len() as u64);
+        pb2.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} (file summaries)")
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
         for file_node in &file_nodes {
             let base = file_node.base();
             let fp = base.file_path.as_deref().unwrap_or("");
             let language = base.language.as_deref().unwrap_or("");
             let symbol_summaries = file_children.get(fp).cloned().unwrap_or_default();
+            pb2.inc(1);
             if symbol_summaries.is_empty() { continue; }
             match tasks::summarize_file(provider.as_ref(), model, fp, language, &symbol_summaries) {
                 Ok(SummarizeOutput { summary }) => {
@@ -332,14 +339,15 @@ Source code:
                     updated.base_mut().ai_summary_status = AiSummaryStatus::Ready;
                     updated.base_mut().ai_model_used = Some(format!("{}/{}", provider.id(), model));
                     if let Err(e) = store.upsert_node(&updated) {
-                        eprintln!("Failed to save file summary for {}: {e}", base.name);
+                        pb2.println(format!("Failed to save file summary for {}: {e}", base.name));
                     }
                 }
                 Err(e) => {
-                    eprintln!("File summarize failed for {}: {e}", base.name);
+                    pb2.println(format!("File summarize failed for {}: {e}", base.name));
                 }
             }
         }
+        pb2.finish_and_clear();
     }
 
     pb.finish_and_clear();
