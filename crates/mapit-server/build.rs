@@ -12,27 +12,38 @@ fn main() {
         .join("mapit-web");
     let embed_dir = manifest_dir.join("embedded_dist");
 
-    // Rebuild the frontend if source files changed
-    let status = std::process::Command::new("npm")
+    // If embedded_dist already exists, skip the npm build
+    // (CI pre-builds the frontend before cargo build)
+    if embed_dir.exists() && embed_dir.read_dir().map(|mut i| i.next().is_some()).unwrap_or(false) {
+        println!("cargo:warning=embedded_dist exists, skipping frontend build");
+        return;
+    }
+
+    // Try to build the frontend - don't hard-fail if npm is unavailable
+    let src = web_dir.join("dist");
+    if let Ok(status) = std::process::Command::new("npm")
         .args(["run", "build"])
         .current_dir(&web_dir)
         .status()
-        .expect("failed to run npm build");
-    if !status.success() {
-        panic!("npm build failed");
+    {
+        if status.success() && src.exists() {
+            if embed_dir.exists() {
+                fs::remove_dir_all(&embed_dir).unwrap();
+            }
+            cp_dir(&src, &embed_dir);
+        } else {
+            panic!("npm build failed");
+        }
+    } else {
+        panic!("npm not found — build frontend manually: cd web/mapit-web && npm install && npm run build");
     }
-
-    // Copy dist/ into embedded_dist/ so rust-embed can find it locally
-    let src = web_dir.join("dist");
-    if embed_dir.exists() {
-        fs::remove_dir_all(&embed_dir).unwrap();
-    }
-    cp_dir(&src, &embed_dir);
 
     // Tell cargo to re-run if web source files change
     println!("cargo:rerun-if-changed={}", web_dir.join("src").display());
     println!("cargo:rerun-if-changed={}", web_dir.display());
-    println!("cargo:rerun-if-changed={}", src.display());
+    if src.exists() {
+        println!("cargo:rerun-if-changed={}", src.display());
+    }
 }
 
 fn cp_dir(src: &Path, dst: &Path) {
