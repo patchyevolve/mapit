@@ -969,16 +969,9 @@ async fn annotate_handler(
                 } else {
                     format!("\n   Caller context:\n     {}", caller_context.join("\n     "))
                 };
-                // Read source code (truncated to 15 lines to keep prompts manageable)
                 let src = read_source_snippet(&target, base.file_path.as_deref().unwrap_or(""), sl, el);
-                let src_lines: Vec<&str> = src.lines().collect();
-                let src_short = if src_lines.len() > 15 {
-                    format!("{}\n   (... truncated, {}+ lines total)", src_lines[..15].join("\n"), src_lines.len())
-                } else {
-                    src.to_owned()
-                };
                 descs.push(format!(
-                    "{idx}. Function: `{}`\n   Signature: {}\n   Lines: {sl}-{el}\n   Callers: {}\n   Callees: {}{caller_context_str}\n   Code:\n   ```{language}\n{src_short}\n   ```",
+                    "{idx}. Function: `{}`\n   Signature: {}\n   Lines: {sl}-{el}\n   Callers: {}\n   Callees: {}{caller_context_str}\n   Code:\n   ```{language}\n{src}\n   ```",
                     base.name, sig, callers.join(", "), callees.join(", "),
                 ));
                 name_to_node.entry(&base.name).or_insert(node);
