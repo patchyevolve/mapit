@@ -10,7 +10,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[derive(Parser)]
 #[command(
     name = "mapit",
-    about = "AI-powered interactive codebase mapper",
+    about = "codebase mapper — builds a live call graph from your source tree",
     version
 )]
 struct Cli {
