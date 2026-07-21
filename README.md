@@ -10,7 +10,7 @@
 
 mapit scans your source code, builds a complete call graph using tree-sitter, and lets you explore it through a web UI and an interactive terminal. Think of it like a live map of your codebase — what calls what, which files depend on what, how functions flow into each other.
 
-Built as a final-year project. Works with Rust, C, C++, Python, JavaScript, TypeScript, and assembly.
+Works with Rust, C, C++, Python, JavaScript, TypeScript, and assembly.
 
 ## Quick start
 
