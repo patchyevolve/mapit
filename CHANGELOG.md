@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — Windows installer with PATH setup
+
+- **install.ps1**: now installs `mapit.exe` to `%USERPROFILE%\.mapit\bin\` and adds it to the persistent user-level PATH (no more portable-only behavior)
+- README updated to fetch install.ps1 from raw.githubusercontent.com
+
 ## 0.5.0 — Ask AI overhaul: project context, source spans, natural language understanding
 
 - **Rich project context** in Ask AI — every query now includes a full project overview with per-file AI summaries and per-function name+summary lists, enabling natural language questions ("how does the main server work", "what happens on error") without exact symbol names

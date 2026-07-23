@@ -1,6 +1,6 @@
 [package]
 name = "mapit-server"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Web server backend for the mapit codebase mapper — REST API + WebSocket"
 repository = "https://github.com/patchyevolve/mapit"
