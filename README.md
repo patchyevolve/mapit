@@ -48,7 +48,7 @@ brew install patchyevolve/tap/mapit
 
 **Windows (PowerShell)**
 ```powershell
-powershell -c "irm https://github.com/patchyevolve/mapit/releases/latest/download/install.ps1 | iex"
+powershell -c "irm https://raw.githubusercontent.com/patchyevolve/mapit/main/install.ps1 | iex"
 ```
 
 **From source**
