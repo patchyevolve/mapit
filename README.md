@@ -28,7 +28,7 @@ The core feature is structural mapping — parsing source files with tree-sitter
 On top of the graph, there are optional features that use an LLM (bring your own — Ollama, OpenAI, or anything compatible):
 - **Summaries** — one-line descriptions for every function, with cross-file context
 - **Flaw detection** — flags dead code, circular deps, suspicious patterns, missing error handling
-- **Text simulation** — describes the runtime flow of a function or the whole project
+- **Ask AI** — free-form questions about the codebase, answered with project overview context, symbol summaries, and relevant source-code snippets
 
 The web UI adds an animated execution trace with source-code preview, branch-condition labels, mock argument values, and resizable panels — no LLM needed for the visual simulation layer.
 
@@ -106,7 +106,7 @@ mapit> exit
 | `mapit explain <name>` | Signature, callers, callees, summary |
 | `mapit trace <name> [--depth N]` | Execution trace from an entry point |
 | `mapit flaws [--severity ...]` | List flagged issues (filter by severity) |
-| `mapit ask "<question>"` | Free-form question about the codebase |
+| `mapit ask "<question>"` | Free-form question about the codebase (uses project context + source spans) |
 | `mapit simulate <name> [--level ...]` | Text-based runtime simulation |
 | `mapit config show` | Print current config |
 | `mapit config set-provider <name>` | Switch LLM provider |
@@ -180,7 +180,7 @@ Language adapters are standalone per-language modules that implement a shared `L
 # Build everything
 cargo build --release
 
-# Run tests (147+ across all crates)
+# Run tests (148+ across all crates)
 cargo test --release
 
 # Frontend dev server (hot reload)

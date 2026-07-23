@@ -394,18 +394,18 @@ function FeatureView() {
 // ─── Stable color palette for directory-based bubble coloring ────────────────
 
 const DIR_PALETTE = [
-  "#5b8def",
-  "#3ecf8e",
-  "#e5566d",
-  "#a684e8",
-  "#e0a440",
-  "#c792ea",
-  "#4fc3d9",
-  "#e07840",
-  "#5ec4b0",
-  "#d47fff",
-  "#ff8c69",
-  "#68b5e8",
+  "#d4a15d",
+  "#7a9c6a",
+  "#c75a4a",
+  "#9b7bb8",
+  "#d4964a",
+  "#c77a9a",
+  "#6aab9e",
+  "#b8824a",
+  "#6d9e8a",
+  "#c47e6a",
+  "#a89b7a",
+  "#8e7a5a",
 ];
 
 function hashStr(s: string): number {
@@ -564,7 +564,7 @@ function FileBubbleGraph({
           ctx.font = `${fontSize}px system-ui, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillStyle = "#e8eaf0";
+          ctx.fillStyle = "#e8ddd0";
           ctx.fillText(label, node.x, node.y);
         }
       }
@@ -637,7 +637,7 @@ function FileBubbleGraph({
         nodeCanvasObject={nodeCanvasObject}
         nodeCanvasObjectMode={() => "replace"}
         onNodeClick={handleNodeClick}
-        backgroundColor="#0b0d12"
+        backgroundColor="#1f1813"
         d3AlphaDecay={0.018}
         d3VelocityDecay={0.35}
         warmupTicks={60}

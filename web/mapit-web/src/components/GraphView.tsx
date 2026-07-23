@@ -11,16 +11,16 @@ interface GraphViewProps {
   highlightNodeId?: string;
 }
 
-// Exact node colors from §3.1
+// Exact node colors
 const NODE_COLORS: Record<string, string> = {
-  feature: "#5b8def",
-  file: "#3ecf8e",
-  function: "#e5566d",
-  module: "#a684e8",
-  type: "#e0a440",
-  macro: "#c792ea",
-  global: "#4fc3d9",
-  external: "#5c6577",
+  feature: "#d4a15d",
+  file: "#7a9c6a",
+  function: "#c75a4a",
+  module: "#9b7bb8",
+  type: "#d4964a",
+  macro: "#c77a9a",
+  global: "#6aab9e",
+  external: "#6d5c4b",
 };
 
 // Helper to get group (directory for files/functions)
@@ -121,10 +121,10 @@ export function GraphView({ nodes, edges, onNodeClick, onBackgroundClick, highli
   // Link color and width (§3.5)
   const linkColor = useCallback((link: any) => {
     switch (link.confidence) {
-      case "exact": return "#5b8def";
-      case "probable": return "#8b91a399";
-      case "dynamic_unresolved": return "#8b91a34d";
-      default: return "#8b91a3";
+      case "exact": return "#d4a15d";
+      case "probable": return "#9b8b7899";
+      case "dynamic_unresolved": return "#9b8b784d";
+      default: return "#9b8b78";
     }
   }, []);
 
@@ -138,7 +138,7 @@ export function GraphView({ nodes, edges, onNodeClick, onBackgroundClick, highli
   }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative z-0" style={{ background: "#0b0d12" }}>
+    <div ref={containerRef} className="w-full h-full relative z-0" style={{ background: "#1f1813" }}>
       <ForceGraph2D
         graphData={graphData}
         width={dimensions.width}
@@ -167,16 +167,16 @@ export function GraphView({ nodes, edges, onNodeClick, onBackgroundClick, highli
           ctx.arc(node.x, node.y, node.val, 0, 2 * Math.PI);
           ctx.fillStyle = nodeColor(node);
           if (node.id === highlightNodeId) {
-            ctx.strokeStyle = "#5b8def";
+            ctx.strokeStyle = "#d4a15d";
             ctx.lineWidth = 3;
             ctx.stroke();
           }
           ctx.fill();
-          
+
           // Draw label
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#e8eaf0';
+          ctx.fillStyle = '#e8ddd0';
           ctx.fillText(label, node.x, node.y - (node.val * 1.5));
         }}
         linkColor={linkColor}
@@ -189,7 +189,7 @@ export function GraphView({ nodes, edges, onNodeClick, onBackgroundClick, highli
           }
         }}
         onBackgroundClick={onBackgroundClick}
-        backgroundColor="#0b0d12"
+        backgroundColor="#1f1813"
         d3AlphaDecay={0.01}
         d3VelocityDecay={0.2}
         warmupTicks={200}

@@ -197,11 +197,11 @@ const STEP_META: Record<StepKind, { sym: string; color: string }> = {
 
 // Node state colours — must match legend
 const COLOR = {
-  active:    "#5b8def",
-  inStack:   "#5b8def99",
-  completed: "#3ecf8e55",
-  visited:   "#e0a44055",
-  inactive:  "#1b1f2a",
+  active:    "#d4a15d",
+  inStack:   "#d4a15d99",
+  completed: "#7a9c6a55",
+  visited:   "#d4964a55",
+  inactive:  "#1f1813",
 };
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ export function SimulationView() {
         scope: "function" as SimScope,
         rootIds: [nid],
         title: state.allNodes.get(nid)?.name ?? nid.slice(0, 12),
-        color: "#5b8def",
+        color: "#c75a4a",
       };
     }
     if (overlay?.kind === "file_simulation") {
@@ -229,7 +229,7 @@ export function SimulationView() {
         scope: "file" as SimScope,
         rootIds: ids,
         title: overlay.title,
-        color: "#3ecf8e",
+        color: "#7a9c6a",
       };
     }
     if (overlay?.kind === "module_simulation") {
@@ -240,7 +240,7 @@ export function SimulationView() {
         scope: "module" as SimScope,
         rootIds: ids,
         title: overlay.title,
-        color: "#e0a440",
+        color: "#d4964a",
       };
     }
     if (overlay?.kind === "feature_simulation") {
@@ -257,7 +257,7 @@ export function SimulationView() {
         scope: "module" as SimScope,
         rootIds: ids,
         title: overlay.title,
-        color: "#d05bce",
+        color: "#9b7bb8",
       };
     }
     if (overlay?.kind === "project_simulation") {
@@ -273,7 +273,7 @@ export function SimulationView() {
         scope: "project" as SimScope,
         rootIds: ids,
         title: "Project (all entry points)",
-        color: "#d05bce",
+        color: "#d4a15d",
       };
     }
     return null;
@@ -532,8 +532,8 @@ export function SimulationView() {
       const srcActive = src === simState.activeNodeId || simState.callStack.includes(src);
       const tgtActive = tgt === simState.activeNodeId || simState.callStack.includes(tgt);
       const isConditional = !!(link as any).condition;
-      if (srcActive && tgtActive) return isConditional ? "#e0a44099" : "#5b8def99";
-      return isConditional ? "#e0a44033" : "#262b3844";
+      if (srcActive && tgtActive) return isConditional ? "#d4964a99" : "#d4a15d99";
+      return isConditional ? "#d4964a33" : "#4d3d2e44";
     },
     [simState],
   );
@@ -550,18 +550,18 @@ export function SimulationView() {
       if (active) {
         ctx.beginPath();
         ctx.arc(node.x, node.y, r + 5 / globalScale, 0, Math.PI * 2);
-        ctx.fillStyle = "#5b8def22";
+        ctx.fillStyle = "#d4a15d22";
         ctx.fill();
         ctx.beginPath();
         ctx.arc(node.x, node.y, r + 2.5 / globalScale, 0, Math.PI * 2);
-        ctx.fillStyle = "#5b8def44";
+        ctx.fillStyle = "#d4a15d44";
         ctx.fill();
       }
 
       if (inStack && !active) {
         ctx.beginPath();
         ctx.arc(node.x, node.y, r + 1.5 / globalScale, 0, Math.PI * 2);
-        ctx.strokeStyle = "#5b8def88";
+        ctx.strokeStyle = "#d4a15d88";
         ctx.lineWidth   = 1.5 / globalScale;
         ctx.stroke();
       }
@@ -581,10 +581,10 @@ export function SimulationView() {
         ctx.fillStyle     = active
           ? "#ffffff"
           : inStack
-            ? "#e8eaf0"
+            ? "#e8ddd0"
             : simState.completedIds.has(id)
-              ? "#3ecf8e"
-              : "#8b91a3";
+              ? "#7a9c6a"
+              : "#9b8b78";
         ctx.fillText(short, node.x, node.y);
       }
     },
@@ -865,7 +865,7 @@ export function SimulationView() {
                   linkWidth={1}
                   linkDirectionalParticles={linkParticles}
                   linkDirectionalParticleWidth={2.5}
-                  linkDirectionalParticleColor={() => "#5b8def"}
+                  linkDirectionalParticleColor={() => "#d4a15d"}
                   linkDirectionalParticleSpeed={0.008}
                   onNodeClick={(node: any) => {
                     dispatch({
@@ -873,7 +873,7 @@ export function SimulationView() {
                       overlay: { kind: "function_detail", node_id: node.id as string },
                     });
                   }}
-                  backgroundColor="#0b0d12"
+                  backgroundColor="#1f1813"
                   d3AlphaDecay={0.018}
                   d3VelocityDecay={0.35}
                   warmupTicks={80}
@@ -895,7 +895,7 @@ export function SimulationView() {
                     </div>
                   ))}
                   <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-0.5 inline-block flex-shrink-0" style={{ background: "#e0a44099" }} />
+                    <span className="w-3 h-0.5 inline-block flex-shrink-0" style={{ background: "#d4964a99" }} />
                     <span className="text-mapit-muted">Conditional edge</span>
                   </div>
                   <p className="text-mapit-muted/60 mt-1 text-[10px]">Click any node → detail panel</p>

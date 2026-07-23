@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — Ask AI overhaul: project context, source spans, natural language understanding
+
+- **Rich project context** in Ask AI — every query now includes a full project overview with per-file AI summaries and per-function name+summary lists, enabling natural language questions ("how does the main server work", "what happens on error") without exact symbol names
+- **Source code spans** — Ask AI includes exact line ranges of matched functions as source code snippets (up to 30K chars, UTF-8 safe), enabling detailed line-level explanations
+- **Smarter grounding** — new `"partial"` status when no symbols match but project overview is available (no more "no relevant context found")
+- **Fallback output** — when AI provider is unavailable, returns project stats instead of a useless message
+- 11% annotation coverage example: broader questions work via file/function summaries; deeper answers improve as annotation coverage grows
+
 ## 0.4.0 — Enhanced simulation UI, resizable panels, condition context
 
 - **Source code panel** in simulation view — live source display for the current step, toggled via header button, stays open during playback

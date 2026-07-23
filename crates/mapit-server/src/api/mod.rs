@@ -1286,7 +1286,7 @@ async fn ask_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AskBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let (results, file_summaries) = {
+    let (results, file_summaries, project_overview, file_count, func_count, annotated, edge_count, lang_str, flaw_count) = {
         let store = state.store.lock().map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1294,27 +1294,73 @@ async fn ask_handler(
             )
         })?;
         let nodes = store.search_nodes_by_text(&body.question).unwrap_or_default();
-        // Build a map of file_path → file-level summary for any file
-        // that contains a matching node
-        let file_paths: std::collections::HashSet<String> = nodes
-            .iter()
-            .filter_map(|n| n.base().file_path.clone())
-            .collect();
-        let mut summaries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        if let Ok(all) = store.get_all_nodes() {
-            for n in &all {
-                if n.base().node_type != model::NodeType::File { continue; }
-                let fp = match n.base().file_path.as_deref() {
-                    Some(fp) if file_paths.contains(fp) => fp,
-                    _ => continue,
-                };
-                if let Some(s) = n.base().ai_summary.as_deref() {
-                    summaries.insert(fp.to_owned(), s.to_owned());
-                }
+
+        let all_nodes = store.get_all_nodes().unwrap_or_default();
+        let mut file_summaries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut file_list: Vec<String> = Vec::new();
+        for n in &all_nodes {
+            if n.base().node_type != model::NodeType::File { continue; }
+            let fp = match n.base().file_path.as_deref() {
+                Some(fp) => fp.to_owned(),
+                _ => continue,
+            };
+            file_list.push(fp.clone());
+            if let Some(s) = n.base().ai_summary.as_deref() {
+                file_summaries.insert(fp, s.to_owned());
             }
         }
-        (nodes, summaries)
+
+        // Build per-file function lists
+        let mut funcs_by_file: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+        for n in &all_nodes {
+            if n.base().node_type != model::NodeType::Function { continue; }
+            let fp = match n.base().file_path.as_deref() {
+                Some(fp) => fp.to_owned(),
+                _ => continue,
+            };
+            let entry = format!(
+                "    {}{}",
+                n.base().name,
+                n.base().ai_summary.as_deref().map(|s| format!(" — {s}")).unwrap_or_default(),
+            );
+            funcs_by_file.entry(fp).or_default().push(entry);
+        }
+
+        // Build file detail lines with summaries and function lists
+        let file_details: Vec<String> = file_list.iter().map(|fp| {
+            let summary = file_summaries.get(fp)
+                .map(|s| format!("\n  Overview: {s}"))
+                .unwrap_or_default();
+            let funcs = funcs_by_file.remove(fp).unwrap_or_default();
+            let func_lines = if funcs.is_empty() {
+                String::new()
+            } else {
+                format!("\n  Functions:\n{}", funcs.join("\n"))
+            };
+            format!("{fp}{summary}{func_lines}")
+        }).collect();
+
+        let fc = store.function_count().unwrap_or(0);
+        let ac = store.annotated_function_count().unwrap_or(0);
+        let ec = store.edge_count().unwrap_or(0);
+        let langs = store.get_distinct_languages().unwrap_or_default();
+        let flc = store.flaw_count(None).unwrap_or(0);
+        let lang_str = if langs.is_empty() { "none detected".into() } else { langs.join(", ") };
+
+        let overview = format!(
+            "Project overview:\n  Files: {}\n  Functions: {} ({} annotated)\n  Call edges: {}\n  Languages: {}\n  Flaws: {}\n\nFiles:\n{}",
+            file_list.len(),
+            fc,
+            ac,
+            ec,
+            lang_str,
+            flc,
+            file_details.join("\n\n"),
+        );
+
+        (nodes, file_summaries, overview, file_list.len(), fc, ac, ec, lang_str, flc)
     };
+
 
     let referenced: Vec<String> = results.iter().map(|n| n.id().to_string()).collect();
     let question = body.question;
@@ -1329,7 +1375,9 @@ async fn ask_handler(
 
     let make_name_fallback = || -> Json<Value> {
         let answer = if referenced.is_empty() {
-            "No relevant context found in the codebase.".to_string()
+            format!(
+                "Project overview:\n  Files: {file_count}\n  Functions: {func_count} ({annotated} annotated)\n  Call edges: {edge_count}\n  Languages: {lang_str}\n  Flaws: {flaw_count}"
+            )
         } else {
             let names: Vec<&str> = results
                 .iter()
@@ -1342,11 +1390,7 @@ async fn ask_handler(
                 names.join(", ")
             )
         };
-        let grounding = if referenced.is_empty() {
-            "no_relevant_context_found"
-        } else {
-            "ok"
-        };
+        let grounding = if referenced.is_empty() { "partial" } else { "ok" };
         Json(json!({
             "answer": answer,
             "referenced_node_ids": referenced,
@@ -1388,12 +1432,65 @@ async fn ask_handler(
     }
 
     let context = if context_parts.is_empty() {
-        "No relevant symbols found in the codebase.".to_string()
+        project_overview
     } else {
         let count = context_parts.len();
         let body = context_parts.join("\n");
+
+        // Read source spans for matched symbols (not whole files)
+        let mut src_parts: Vec<String> = Vec::new();
+        let mut total_src_chars = 0;
+        const MAX_SRC_CHARS: usize = 30_000;
+        for node in results.iter() {
+            if total_src_chars >= MAX_SRC_CHARS { break; }
+            let base = node.base();
+            let fp = match base.file_path.as_deref() {
+                Some(fp) => fp,
+                _ => continue,
+            };
+            let span = match &base.span {
+                Some(s) => s,
+                _ => continue,
+            };
+            let abs_path = state.project_root.join(fp);
+            let code = match std::fs::read_to_string(&abs_path) {
+                Ok(c) => c,
+                _ => continue,
+            };
+            let lines: Vec<&str> = code.lines().collect();
+            let start = (span.start_line as usize).saturating_sub(1);
+            let end = (span.end_line as usize).min(lines.len());
+            if start >= end { continue; }
+            let span_text = lines[start..end].join("\n");
+            let remaining = MAX_SRC_CHARS.saturating_sub(total_src_chars);
+            let portion: String = if span_text.len() > remaining {
+                let mut p = String::with_capacity(remaining);
+                for ch in span_text.chars() {
+                    if p.len() + ch.len_utf8() > remaining { break; }
+                    p.push(ch);
+                }
+                p
+            } else {
+                span_text
+            };
+            if portion.is_empty() { continue; }
+            total_src_chars += portion.len();
+            src_parts.push(format!(
+                "--- Source: {fp}:{}-{} (symbol: {}) ---\n{portion}\n--- End ---",
+                span.start_line, span.end_line, base.name,
+            ));
+        }
+
+        let src_section = if src_parts.is_empty() {
+            String::new()
+        } else {
+            format!("\n\nSource code spans:\n{}", src_parts.join("\n\n"))
+        };
+
         format!(
-            "The codebase has {count} symbol(s) relevant to the question:\n\n{body}"
+            "{}\n\nRelevant symbols ({count}):\n\n{body}{}",
+            project_overview,
+            src_section,
         )
     };
 
@@ -1407,10 +1504,10 @@ async fn ask_handler(
 
     match tasks::answer(provider.as_ref(), &model, &context, &question) {
         Ok(output) => {
-            let grounding = if output.referenced_node_ids.is_empty() && referenced.is_empty() {
-                "no_relevant_context_found"
-            } else {
+            let grounding = if !output.referenced_node_ids.is_empty() || !referenced.is_empty() {
                 "ok"
+            } else {
+                "partial"
             };
             let mut all_refs = output.referenced_node_ids.clone();
             for id in &referenced {
